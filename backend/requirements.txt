@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+tensorflow
+numpy
+pandas
+scikit-learn
+sqlalchemy
+python-multipart
+aiofiles

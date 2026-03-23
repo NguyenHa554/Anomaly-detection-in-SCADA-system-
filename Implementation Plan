@@ -1,0 +1,192 @@
+# Real-Time SCADA Anomaly Detection Website
+
+Build a localhost web application that integrates the CNN anomaly detection model from `data2.ipynb` with an interactive React dashboard for real-time monitoring, alerts, and analytics.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Database choice — PostgreSQL vs SQLite**: See evaluation below. My recommendation is **SQLite** for your capstone since it's zero-setup and sufficient for a single-user demo. But if you want the capstone plan's full PostgreSQL stack, I can set that up instead. **Please confirm which one you want.**
+
+> [!IMPORTANT]
+> **Model export step**: The notebook trains models in-memory but doesn't save them. I'll create an `export_models.py` script to re-train and save all artifacts.
+
+---
+
+## PostgreSQL vs SQLite Evaluation
+
+| Criteria | SQLite | PostgreSQL |
+|----------|--------|------------|
+| **Setup** | Zero install — single file, built into Python | Requires installing PostgreSQL server, creating DB/user |
+| **Performance (single user)** | ✅ Excellent for localhost demo | Overkill — adds latency from network layer |
+| **Performance (multi user)** | ❌ Poor — file-level locking | ✅ Designed for concurrent connections |
+| **Time-series support** | ❌ None — must manually query by timestamp | ✅ TimescaleDB extension for time-series |
+| **Deployment complexity** | ✅ Nothing to deploy — `.db` file ships with project | ⚠️ Needs running PostgreSQL service or Docker |
+| **Capstone impression** | Adequate for demo | Looks more "production-grade" to evaluators |
+| **Data volume** | Good up to ~1GB (your SWaT.csv is ~7MB) | Unlimited — handles TB-scale |
+| **SQL compatibility** | Most SQL features, no JSONB, limited ALTER TABLE | Full SQL, JSONB, window functions, CTEs |
+| **Portability** | ✅ Copy one file = done | ❌ Needs DB dump/restore |
+
+> [!TIP]
+> **Recommendation**: Use **SQLite** — your dataset is small (~15K rows), single-user localhost demo, zero setup friction. You can always migrate to PostgreSQL later since SQLAlchemy abstracts the DB layer. If your advisor specifically values seeing PostgreSQL, it's a 10-minute change.
+
+---
+
+## Proposed Changes
+
+### Model Export
+
+#### [NEW] [export_models.py](file:///c:/nguyen/ĐA KTMT/export_models.py)
+Script that replicates the notebook's training pipeline and saves:
+- `ml_models/P1_model.h5`, `P2_model.h5`, `P3_model.h5`, `P5_model.h5` — trained CNN models
+- `ml_models/P1_scaler.pkl` ... `P5_scaler.pkl` — MinMaxScaler objects
+- `ml_models/stats.json` — mu/sigma statistics per stage for z-score thresholds
+- `ml_models/thresholds.json` — best T and W values from grid search
+
+Key parameters from notebook:
+| Stage | Features | Best T | Best W | Precision | Recall | F1 |
+|-------|----------|--------|--------|-----------|--------|-----|
+| P1 | 25 | 2.0 | 30 | 0.80 | 0.95 | 0.87 |
+| P2 | 13 | 2.0 | 300 | 0.85 | 1.00 | 0.92 |
+| P3 | 17 | 2.0 | 30 | 0.81 | 0.93 | 0.87 |
+| P5 | 13 | 2.0 | 30 | 0.81 | 0.99 | 0.89 |
+
+---
+
+### Backend (FastAPI + SQLite)
+
+#### [NEW] [backend/main.py](file:///c:/nguyen/ĐA KTMT/backend/main.py)
+FastAPI application entry point:
+- CORS middleware for React dev server (`localhost:3000`)
+- REST endpoints: `/api/status`, `/api/ingest`, `/api/alerts`, `/api/alerts/{id}/acknowledge`, `/api/upload-csv`, `/api/history`
+- WebSocket endpoint `/ws` for real-time push
+- Startup event to load ML models
+
+#### [NEW] [backend/services/anomaly_detector.py](file:///c:/nguyen/ĐA KTMT/backend/services/anomaly_detector.py)
+`AnomalyDetector` class — mirrors the notebook logic:
+- Loads 4 stage models + scalers + stats
+- Maintains rolling buffer (200 time steps per stage)
+- `predict(stage)` → returns z-score, threshold comparison, anomaly flag
+- Uses `add_derivative_features()` and sequence creation from notebook
+
+#### [NEW] [backend/services/alert_service.py](file:///c:/nguyen/ĐA KTMT/backend/services/alert_service.py)
+Alert generation with severity levels (CRITICAL/HIGH/MEDIUM/LOW), cooldown logic, and database persistence.
+
+#### [NEW] [backend/services/data_pipeline.py](file:///c:/nguyen/ĐA KTMT/backend/services/data_pipeline.py)
+Orchestrates: ingest → per-stage detection → ensemble (OR logic) → alert → WebSocket broadcast.
+
+#### [NEW] [backend/database.py](file:///c:/nguyen/ĐA KTMT/backend/database.py)
+SQLite setup with 3 tables: `sensor_data`, `anomalies`, `alerts`. Uses SQLAlchemy so DB can be swapped to PostgreSQL with one config change.
+
+#### [NEW] [backend/simulator.py](file:///c:/nguyen/ĐA KTMT/backend/simulator.py)
+Data simulator that replays `SWaT.csv` rows through the API at accelerated speed for demo purposes.
+
+#### [NEW] [backend/requirements.txt](file:///c:/nguyen/ĐA KTMT/backend/requirements.txt)
+Dependencies: `fastapi`, `uvicorn[standard]`, `tensorflow`, `numpy`, `pandas`, `scikit-learn`, `sqlalchemy`, `websockets`, `python-multipart`.
+
+---
+
+### Frontend (React + Vite + Recharts)
+
+Created via `npx create-vite@latest ./ --template react` inside `frontend/`.
+
+#### [NEW] [frontend/src/App.jsx](file:///c:/nguyen/ĐA KTMT/frontend/src/App.jsx)
+Root component with React Router:
+- `/` → Dashboard page
+- `/upload` → CSV upload page
+- `/alerts` → Full alert history page
+
+#### [NEW] [frontend/src/pages/Dashboard.jsx](file:///c:/nguyen/ĐA KTMT/frontend/src/pages/Dashboard.jsx)
+Main dashboard with sections:
+- **StatusCards**: Active alerts count, system status (Normal/Attack), detections today
+- **StageMonitor**: P1–P5 status indicators with real-time anomaly scores
+- **SensorCharts**: Real-time line charts per stage (Recharts)
+- **AlertPanel**: Recent alerts with severity badges, timestamps, acknowledge buttons
+
+#### [NEW] [frontend/src/pages/UploadPage.jsx](file:///c:/nguyen/ĐA KTMT/frontend/src/pages/UploadPage.jsx)
+Drag-and-drop CSV upload → batch predictions → results table.
+
+#### [NEW] [frontend/src/components/](file:///c:/nguyen/ĐA KTMT/frontend/src/components/)
+Reusable components:
+- `Header.jsx` — Nav bar with title, status indicator, nav links
+- `StatusCard.jsx` — Glassmorphism stat card with icon + value
+- `StageIndicator.jsx` — Single stage (P1–P5) status circle with score
+- `SensorChart.jsx` — Recharts `LineChart` with threshold annotation line
+- `AlertCard.jsx` — Single alert with severity badge, message, acknowledge button
+- `AlertPanel.jsx` — Scrollable list of AlertCards
+
+#### [NEW] [frontend/src/hooks/useWebSocket.js](file:///c:/nguyen/ĐA KTMT/frontend/src/hooks/useWebSocket.js)
+Custom React hook for WebSocket connection with auto-reconnection logic.
+
+#### [NEW] [frontend/src/services/api.js](file:///c:/nguyen/ĐA KTMT/frontend/src/services/api.js)
+Fetch wrapper for all REST API calls to the backend.
+
+#### [NEW] [frontend/src/index.css](file:///c:/nguyen/ĐA KTMT/frontend/src/index.css)
+Modern dark theme with:
+- CSS custom properties for colors/spacing
+- Glassmorphism cards with `backdrop-filter`
+- Smooth micro-animations and hover effects
+- Responsive grid layout
+- Severity color system (red/orange/yellow/blue)
+
+---
+
+## Project Structure
+```
+c:\nguyen\ĐA KTMT\
+├── backend/
+│   ├── main.py                # FastAPI app
+│   ├── database.py            # SQLAlchemy + SQLite
+│   ├── simulator.py           # Data replay for demo
+│   ├── requirements.txt
+│   └── services/
+│       ├── anomaly_detector.py
+│       ├── alert_service.py
+│       └── data_pipeline.py
+├── frontend/                  # React (Vite)
+│   ├── package.json
+│   ├── vite.config.js
+│   ├── index.html
+│   └── src/
+│       ├── App.jsx
+│       ├── index.css
+│       ├── pages/
+│       │   ├── Dashboard.jsx
+│       │   ├── UploadPage.jsx
+│       │   └── AlertsPage.jsx
+│       ├── components/
+│       │   ├── Header.jsx
+│       │   ├── StatusCard.jsx
+│       │   ├── StageIndicator.jsx
+│       │   ├── SensorChart.jsx
+│       │   ├── AlertCard.jsx
+│       │   └── AlertPanel.jsx
+│       ├── hooks/
+│       │   └── useWebSocket.js
+│       └── services/
+│           └── api.js
+├── ml_models/                 # Exported models
+│   ├── P1_model.h5 ... P5_model.h5
+│   ├── P1_scaler.pkl ... P5_scaler.pkl
+│   ├── stats.json
+│   └── thresholds.json
+├── export_models.py
+├── data2.ipynb
+├── SWaT.csv
+└── capstone_project_plan.md
+```
+
+---
+
+## Verification Plan
+
+### Automated Tests
+1. **Backend**: `python -m uvicorn backend.main:app --port 8000` — verify startup
+2. **API health**: `curl http://localhost:8000/api/status` — verify JSON response
+3. **Frontend**: `cd frontend && npm run dev` — verify React app at `localhost:5173`
+
+### Browser Verification
+1. Open React app → verify dashboard renders all components
+2. Start simulator → verify real-time chart updates via WebSocket
+3. Verify alert cards appear when anomalies detected
+4. Click "Acknowledge" → verify alert status updates
+5. Navigate to Upload page → upload CSV → verify results
