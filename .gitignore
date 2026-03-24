@@ -1,0 +1,52 @@
+# Virtual Environments
+.venv/
+backend/.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Python Cache / Compiled Files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Node / JavaScript
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Datasets and Large Files (Optional, but recommended)
+*.csv
+# SWaT.csv
+
+# ML Models (Optional, but recommended to prevent pushing large binaries)
+*.pkl
+*.h5
+*.keras
+*.pt
+# ml_models/
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Editor Directories and Files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
