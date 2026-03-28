@@ -7,7 +7,7 @@ and install psycopg2: pip install psycopg2-binary
 
 from sqlalchemy import (
     create_engine, Column, Integer, Float, Boolean,
-    String, DateTime, JSON
+    String, DateTime, JSON, inspect, text
 )
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from datetime import datetime, timezone
@@ -28,11 +28,14 @@ class Base(DeclarativeBase):
 class SensorReading(Base):
     __tablename__ = "sensor_data"
 
-    id        = Column(Integer, primary_key=True, index=True)
-    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    stage     = Column(String(10), index=True)
-    z_score   = Column(Float, nullable=True)
-    is_anomaly = Column(Boolean, default=False)
+    id              = Column(Integer, primary_key=True, index=True)
+    timestamp       = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    stage           = Column(String(10), index=True)
+    z_score         = Column(Float, nullable=True)
+    is_anomaly      = Column(Boolean, default=False)
+    sensor_values   = Column(JSON, nullable=True)
+    actuator_values = Column(JSON, nullable=True)
+    raw_values      = Column(JSON, nullable=True)
 
 
 class Anomaly(Base):
@@ -65,6 +68,25 @@ class Alert(Base):
 
 def create_tables():
     Base.metadata.create_all(bind=engine)
+    _ensure_sensor_data_columns()
+
+
+def _ensure_sensor_data_columns():
+    inspector = inspect(engine)
+    existing_columns = {col["name"] for col in inspector.get_columns("sensor_data")}
+    required_columns = {
+        "sensor_values": "JSON",
+        "actuator_values": "JSON",
+        "raw_values": "JSON",
+    }
+
+    with engine.begin() as connection:
+        for column_name, column_type in required_columns.items():
+            if column_name in existing_columns:
+                continue
+            connection.execute(
+                text(f"ALTER TABLE sensor_data ADD COLUMN {column_name} {column_type}")
+            )
 
 
 def get_db():

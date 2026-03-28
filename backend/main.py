@@ -16,8 +16,8 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
 from backend.database import create_tables, get_db, Alert
-from backend.services.anomaly_detector import detector
-from backend.services.data_pipeline import process_row
+from backend.services.anomaly_detector import detector, STAGE_FEATURES
+from backend.services.data_pipeline import process_row, reset_runtime_state
 
 
 # ── WebSocket Manager ─────────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ class AlertOut(BaseModel):
 @app.get("/api/status")
 def get_status():
     stages = {}
-    for stage in ["P1", "P2", "P3", "P5"]:
+    for stage in STAGE_FEATURES:
         buf = detector.buffers.get(stage, [])
         stages[stage] = {
             "buffer_fill":   len(buf),
@@ -106,6 +106,7 @@ def get_status():
         }
     return {
         "model_loaded": detector.is_loaded,
+        "loaded_stages": list(detector.loaded_stages),
         "stages":       stages,
         "server_time":  datetime.now(timezone.utc).isoformat(),
     }
@@ -117,6 +118,18 @@ async def ingest(row: SensorRow, db: Session = Depends(get_db)):
         raise HTTPException(503, "Models not loaded yet. Run export_models.py first.")
     result = await process_row(row.model_dump(), db, manager.broadcast)
     return result
+
+
+@app.post("/api/runtime/reload")
+def reload_runtime():
+    create_tables()
+    reset_runtime_state()
+    detector.load()
+    return {
+        "ok": True,
+        "loaded_stages": list(detector.loaded_stages),
+        "server_time": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.get("/api/alerts", response_model=List[AlertOut])
@@ -150,11 +163,14 @@ def get_history(stage: str = None, limit: int = 500, db: Session = Depends(get_d
     rows = q.limit(limit).all()
     return [
         {
-            "id":        r.id,
-            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
-            "stage":     r.stage,
-            "z_score":   r.z_score,
+            "id":             r.id,
+            "timestamp":      r.timestamp.isoformat() if r.timestamp else None,
+            "stage":          r.stage,
+            "z_score":        r.z_score,
             "is_anomaly": r.is_anomaly,
+            "sensor_values":  r.sensor_values,
+            "actuator_values": r.actuator_values,
+            "raw_values":     r.raw_values,
         }
         for r in reversed(rows)
     ]

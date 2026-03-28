@@ -11,10 +11,10 @@ const uptimeData = Array.from({ length: 30 }, (_, i) => ({
 }));
 
 const incidentData = [
-    { name: 'Giai đoạn P1', value: 45 },
-    { name: 'Giai đoạn P4', value: 30 },
-    { name: 'Giai đoạn P3', value: 15 },
-    { name: 'Khác', value: 10 },
+    { name: 'Giai đoạn P4', value: 38 },
+    { name: 'Giai đoạn P6', value: 27 },
+    { name: 'Giai đoạn P2', value: 20 },
+    { name: 'Khác', value: 15 },
 ];
 const COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#94a3b8'];
 
@@ -47,12 +47,12 @@ export default function ReportsPage() {
                         </select>
                         <select className="form-select" style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
                             <option>Toàn bộ nhà máy</option>
-                            <option>Stage P1 - Cấp nước thô</option>
-                            <option>Stage P2 - Xử lý hóa chất</option>
-                            <option>Stage P3 - Siêu lọc</option>
-                            <option>Stage P4 - Khử clo</option>
-                            <option>Stage P5 - Thu hồi</option>
-                            <option>Stage P6 - Làm sạch</option>
+                            <option>Giai đoạn P1 - Cấp nước thô</option>
+                            <option>Giai đoạn P2 - Xử lý hóa chất</option>
+                            <option>Giai đoạn P3 - Siêu lọc</option>
+                            <option>Giai đoạn P4 - Khử clo và thẩm thấu ngược</option>
+                            <option>Giai đoạn P5 - Thu hồi nước sạch</option>
+                            <option>Giai đoạn P6 - Làm sạch hệ thống</option>
                         </select>
                     </div>
                 </div>
@@ -81,8 +81,8 @@ export default function ReportsPage() {
                         <h2 style={{ fontSize: '1.2rem', fontWeight: 600 }}>Tổng quan Vận hành AI</h2>
                     </div>
                     <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                        Trong tháng 3/2026, hệ thống duy trì <strong>99.2%</strong> uptime. Động cơ AI giám sát đã phát hiện <strong>128 sự cố</strong>, 
-                        tập trung chủ yếu tại Giai đoạn P1 (Cấp nước thô) và P4. Thời gian phản hồi trung bình (MTTR) đạt 1m 45s, 
+                        Trong tháng 3/2026, hệ thống duy trì <strong>99.2%</strong> uptime. Động cơ AI giám sát đã phát hiện <strong>128 sự cố</strong>,
+                        tập trung chủ yếu tại Giai đoạn P4 và P6. Thời gian phản hồi trung bình (MTTR) đạt 1m 45s,
                         <span style={{ color: 'var(--color-normal)', fontWeight: 600 }}> cải thiện 12%</span> so với tháng trước.
                     </p>
                 </div>
@@ -146,7 +146,7 @@ export default function ReportsPage() {
                                 </div>
                             </div>
                             <div className="card" style={{ padding: 24, flex: 1 }}>
-                                <h3 className="card-title" style={{ marginBottom: 16 }}>Top Cảm biến Biến thiên</h3>
+                                <h3 className="card-title" style={{ marginBottom: 16 }}>Top Cảm biến biến thiên</h3>
                                 <table style={{ width: '100%', fontSize: '0.85rem', textAlign: 'left', borderCollapse: 'collapse' }}>
                                     <thead>
                                         <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)' }}>
@@ -250,3 +250,5 @@ export default function ReportsPage() {
         </div>
     );
 }
+
+

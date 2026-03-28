@@ -2,11 +2,11 @@ import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Upload, Bell } from 'lucide-react';
 
 const STATE_LABELS = {
-    connected: 'System Online',
-    connecting: 'Connecting…',
-    disconnected: 'Disconnected',
-    error: 'Connection Error',
-    offline: 'Backend Offline',
+    connected: 'Hệ thống Trực tuyến',
+    connecting: 'Đang kết nối…',
+    disconnected: 'Bị ngắt kết nối',
+    error: 'Lỗi kết nối',
+    offline: 'Backend Ngoại tuyến',
 };
 
 export default function Header({ connectionState = 'connecting', systemStatus = 'normal', activeAlerts = 0 }) {
@@ -17,8 +17,8 @@ export default function Header({ connectionState = 'connecting', systemStatus = 
     const statusLabel = connectionState !== 'connected'
         ? STATE_LABELS[connectionState]
         : systemStatus === 'attack'
-            ? `⚠ Attack Detected`
-            : 'System Normal';
+            ? `⚠ Có sự cố mạng`
+            : 'Hệ thống Bình thường';
 
     return (
         <header className="header">
@@ -28,7 +28,7 @@ export default function Header({ connectionState = 'connecting', systemStatus = 
                     <div className="header-logo">S</div>
                     <div>
                         <div className="header-title">SCADA Guard</div>
-                        <div className="header-subtitle">Real-time Anomaly Detection</div>
+                        <div className="header-subtitle">Giám sát Bất thường Thời gian thực</div>
                     </div>
                 </NavLink>
 
@@ -36,11 +36,11 @@ export default function Header({ connectionState = 'connecting', systemStatus = 
                 <nav className="header-nav">
                     <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
                         <LayoutDashboard size={15} />
-                        Dashboard
+                        Tổng quan
                     </NavLink>
-                    <NavLink to="/alerts" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+                    <NavLink to="/incidents" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
                         <Bell size={15} />
-                        Alerts
+                        Cảnh báo
                         {activeAlerts > 0 && (
                             <span style={{ background: '#ef4444', color: '#fff', borderRadius: '999px', padding: '1px 6px', fontSize: '0.65rem', fontWeight: 700 }}>
                                 {activeAlerts}
@@ -49,7 +49,7 @@ export default function Header({ connectionState = 'connecting', systemStatus = 
                     </NavLink>
                     <NavLink to="/upload" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
                         <Upload size={15} />
-                        Upload
+                        Tải lên
                     </NavLink>
                 </nav>
 

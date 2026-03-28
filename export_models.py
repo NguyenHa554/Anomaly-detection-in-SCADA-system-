@@ -9,7 +9,7 @@ Run once before starting the backend:
   python export_models.py
 """
 
-import os, json, pickle
+import os, json, pickle, re
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -28,13 +28,14 @@ TIME_STEPS = 200
 
 # Best T and W found by grid-search in the notebook
 BEST_PARAMS = {
-    "P1": {"T": 2.0, "W": 30},
-    "P2": {"T": 2.0, "W": 300},
+    "P2": {"T": 2.0, "W": 30},
     "P3": {"T": 2.0, "W": 30},
-    "P5": {"T": 2.0, "W": 30},
+    "P4": {"T": 2.0, "W": 30},
+    "P5": {"T": 2.5, "W": 30},
+    "P6": {"T": 2.0, "W": 30},
 }
 
-# 44 features selected by correlation with 'Attack' in the notebook
+# Features selected by correlation with 'Attack' in the notebook
 SELECTED_FEATURES = [
     "FIT 101", "LIT 101", "MV 101", "P1_STATE", "P101 Status",
     "AIT 201", "AIT 202", "AIT 203", "FIT 201", "MV201",
@@ -46,7 +47,15 @@ SELECTED_FEATURES = [
     "AIT 501", "AIT 502", "AIT 503", "AIT 504",
     "FIT 501", "FIT 502", "FIT 503", "FIT 504",
     "MV 501", "PIT 501", "PIT 502", "PIT 503",
-    "FIT 601", "LSH 601", "P601 Status",
+    "FIT 601", "LSH 601", "P601 Status", "P102 Status",
+    "LS 201", "LS 202", "LSL 203", "LSLL 203",
+    "P2_STATE", "P201 Status", "P202 Status", "P204 Status",
+    "P206 Status", "P207 Status", "P208 Status", "P302 Status",
+    "AIT 401", "LS 401", "P4_STATE", "P402 Status",
+    "P403 Status", "P404 Status", "MV 502", "MV 503",
+    "MV 504", "P5_STATE", "P501 Status", "P502 Status",
+    "LSH 602", "LSH 603", "LSL 601", "LSL 602",
+    "LSL 603", "P6 STATE", "P602 Status", "P603 Status",
 ]
 
 # Attack periods from the notebook (UTC)
@@ -70,19 +79,23 @@ def add_derivative_features(data: np.ndarray) -> np.ndarray:
 
 def create_sequences(X: np.ndarray, time_steps: int = 200):
     Xs, ys = [], []
-    n_orig = X.shape[1] // 2      # original (non-derivative) feature count
     for i in range(len(X) - time_steps):
         Xs.append(X[i : i + time_steps])
-        ys.append(X[i + time_steps, :n_orig])
+        original_features_count = X.shape[1] // 2
+        ys.append(X[i + time_steps, :original_features_count])
     return np.array(Xs), np.array(ys)
 
 
 def get_stage_features(columns) -> dict:
     stages = {}
-    for num in [1, 2, 3, 5]:
-        cols = [c for c in columns if str(num) in c or f"P{num}" in c]
+    for stage_num in [2, 3, 4, 5, 6]:
+        cols = [
+            c for c in columns
+            if re.search(rf"\b{stage_num}\d{{2}}\b", c)
+            or re.fullmatch(rf"P{stage_num}_STATE", c)
+        ]
         if cols:
-            stages[f"P{num}"] = cols
+            stages[f"P{stage_num}"] = cols
     return stages
 
 

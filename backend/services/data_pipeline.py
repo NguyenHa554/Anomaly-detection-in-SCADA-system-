@@ -4,12 +4,71 @@ data_pipeline.py — Orchestrates: ingest → detect → alert → broadcast.
 
 import numpy as np
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from backend.services.anomaly_detector import detector, STAGE_FEATURES
-from backend.services.alert_service import alert_service
-from backend.database import SensorReading
+from backend.services.alert_service import alert_service, get_severity
+from backend.database import SensorReading, Anomaly
+
+ALL_FEATURES = tuple(dict.fromkeys(feature for cols in STAGE_FEATURES.values() for feature in cols))
+LAST_KNOWN_VALUES: Dict[str, float] = {}
+STAGE_DISPLAY_FIELDS = {
+    "P2": {
+        "sensors": ["AIT 201", "AIT 202", "FIT 201"],
+        "actuators": ["P203 Status", "MV201"],
+    },
+    "P3": {
+        "sensors": ["AIT 301", "DPIT 301", "FIT 301", "LIT 301"],
+        "actuators": ["P301 Status", "MV 301"],
+    },
+    "P4": {
+        "sensors": ["AIT 401", "AIT 402", "FIT 401", "LIT 401", "LS 401"],
+        "actuators": ["P401 Status", "P402 Status", "P403 Status", "P404 Status", "UV401"],
+    },
+    "P5": {
+        "sensors": ["FIT 501", "PIT 501", "AIT 501"],
+        "actuators": ["P501 Status", "MV 501"],
+    },
+    "P6": {
+        "sensors": ["FIT 601", "LSH 601", "LSH 602", "LSH 603", "LSL 601", "LSL 602", "LSL 603"],
+        "actuators": ["P601 Status", "P602 Status", "P603 Status"],
+    },
+}
+
+
+def _coerce_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if np.isnan(number):
+        return None
+    return number
+
+
+def _normalise_row(row: Dict) -> Dict[str, float]:
+    """
+    Approximate notebook ffill() for streaming input by carrying forward
+    the most recent valid value for each selected feature.
+    """
+    normalised: Dict[str, float] = {}
+
+    for feature in ALL_FEATURES:
+        current = _coerce_float(row.get(feature))
+        if current is None:
+            current = LAST_KNOWN_VALUES.get(feature, 0.0)
+        else:
+            LAST_KNOWN_VALUES[feature] = current
+        normalised[feature] = current
+
+    return normalised
+
+
+def reset_runtime_state():
+    LAST_KNOWN_VALUES.clear()
 
 
 async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
@@ -20,23 +79,47 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
     """
     timestamp = datetime.now(timezone.utc)
     stage_results = []
+    feature_row = _normalise_row(row)
 
     for stage, cols in STAGE_FEATURES.items():
-        # Extract features for this stage (fill 0 for missing columns)
-        features = np.array([float(row.get(c, 0.0)) for c in cols], dtype=np.float32)
+        # Build stage input using notebook-aligned feature values.
+        features = np.array([feature_row[c] for c in cols], dtype=np.float32)
 
         detector.add_data_point(stage, features)
         result = detector.predict(stage)
         result["timestamp"] = timestamp.isoformat()
+        display_fields = STAGE_DISPLAY_FIELDS.get(stage, {"sensors": [], "actuators": []})
+        sensor_values = {name: feature_row[name] for name in display_fields["sensors"] if name in feature_row}
+        actuator_values = {name: feature_row[name] for name in display_fields["actuators"] if name in feature_row}
+        raw_values = {name: feature_row[name] for name in cols if name in feature_row}
 
         # Persist sensor reading
         reading = SensorReading(
-            timestamp  = timestamp,
-            stage      = stage,
-            z_score    = result.get("max_z_score"),
-            is_anomaly = result.get("is_anomaly", False),
+            timestamp       = timestamp,
+            stage           = stage,
+            z_score         = result.get("max_z_score"),
+            is_anomaly      = result.get("is_anomaly", False),
+            sensor_values   = sensor_values,
+            actuator_values = actuator_values,
+            raw_values      = raw_values,
         )
         db.add(reading)
+
+        if result.get("status") == "ok" and result.get("is_anomaly"):
+            anomaly = Anomaly(
+                timestamp     = timestamp,
+                stage         = stage,
+                anomaly_score = result["anomaly_score"],
+                max_z_score   = result["max_z_score"],
+                threshold     = result["threshold"],
+                severity      = get_severity(result["anomaly_score"]),
+                details       = {
+                    "sensor_values": sensor_values,
+                    "actuator_values": actuator_values,
+                    "raw_values": raw_values,
+                },
+            )
+            db.add(anomaly)
 
         # Maybe generate an alert
         if result.get("status") == "ok" and result.get("is_anomaly"):
@@ -56,7 +139,7 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
         "timestamp":       timestamp.isoformat(),
         "stages":          stage_results,
         "overall_anomaly": overall,
-        "raw_data":        row, # Send raw data to frontend for display
+        "raw_data":        feature_row,
     }
 
     await broadcast_fn(payload)

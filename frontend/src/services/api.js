@@ -20,7 +20,7 @@ async function request(path, options = {}) {
 /** GET /api/status → { status, active_alerts, detections_today, uptime_seconds } */
 export const getStatus = () => request('/api/status');
 
-/** GET /api/alerts?limit=N&offset=M&severity=X&acknowledged=bool */
+/** GET /api/alerts */
 export const getAlerts = (params = {}) => {
     const qs = new URLSearchParams(
         Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== ''))

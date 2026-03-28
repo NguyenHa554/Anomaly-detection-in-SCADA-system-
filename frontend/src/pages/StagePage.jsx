@@ -1,23 +1,54 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
 import StatusCard from '../components/StatusCard';
 import SensorChart from '../components/SensorChart';
-
-const STAGE_CONFIG = {
-    P1: { threshold: 2.0, window: 30, name: 'Cấp nước thô', monitored: true, sensors: ['FIT 101', 'LIT 101'], actuators: ['P101 Status', 'MV 101'] },
-    P2: { threshold: 2.0, window: 300, name: 'Xử lý hóa chất', monitored: true, sensors: ['AIT 201', 'AIT 202', 'FIT 201'], actuators: ['P203 Status', 'MV201'] },
-    P3: { threshold: 2.0, window: 30, name: 'Siêu lọc', monitored: true, sensors: ['AIT 301', 'DPIT 301', 'FIT 301', 'LIT 301'], actuators: ['P301 Status', 'MV 301'] },
-    P4: { threshold: 2.0, window: 30, name: 'Khử clo và thẩm thấu ngược', monitored: false },
-    P5: { threshold: 2.0, window: 30, name: 'Thu hồi nước sạch', monitored: true, sensors: ['FIT 501', 'PIT 501', 'AIT 501'], actuators: ['P501 Status', 'MV 501'] },
-    P6: { threshold: 2.0, window: 30, name: 'Làm sạch hệ thống', monitored: false },
-};
+import { STAGE_CONFIG } from '../constants/stages';
 
 const MAX_CHART_POINTS = 120;
 
+function parseNumericValue(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function DeviceListCard({ title, icon, items, emptyMessage }) {
+    return (
+        <div className="card" style={{ padding: 24 }}>
+            <div className="card-header" style={{ marginBottom: 16 }}>
+                <h3 className="card-title">
+                    <span className="material-symbols-outlined" style={{ color: 'var(--accent-primary)' }}>{icon}</span>
+                    {title}
+                </h3>
+            </div>
+
+            {items.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                    {items.map((item) => (
+                        <div
+                            key={item}
+                            style={{
+                                padding: '12px 14px',
+                                borderRadius: 10,
+                                border: '1px solid var(--border-subtle)',
+                                background: 'var(--bg-surface)',
+                                fontWeight: 600,
+                            }}
+                        >
+                            {item}
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <div style={{ color: 'var(--text-muted)' }}>{emptyMessage}</div>
+            )}
+        </div>
+    );
+}
+
 export default function StagePage() {
     const { stageId } = useParams();
-    const stageKey = stageId.toUpperCase();
+    const stageKey = stageId?.toUpperCase();
     const config = STAGE_CONFIG[stageKey];
 
     const [chartData, setChartData] = useState({});
@@ -25,50 +56,43 @@ export default function StagePage() {
     const [status, setStatus] = useState({ isAnomaly: false, message: 'CHỜ DỮ LIỆU...' });
     const tickRef = useRef(0);
 
-    // Initialize chart data structures
-    useEffect(() => {
-        if (!config || !config.monitored) return;
-        setChartData((prev) => {
-            const initialCharts = {};
-            config.sensors.forEach(s => { initialCharts[s] = prev[s] || []; });
-            return initialCharts;
-        });
-    }, [stageKey, config]);
-
     const handleMessage = useCallback((msg) => {
-        if (!config || !config.monitored) return;
-        if (msg.type === 'sensor_update') {
-            const { stages, raw_data } = msg;
+        if (!config?.monitored || msg.type !== 'sensor_update') return;
 
-            const stageStatus = stages.find(s => s.stage === stageKey);
-            if (stageStatus) {
-                tickRef.current += 1;
-                const t = tickRef.current;
-                
-                setCurrentData(() => {
-                    const update = {};
-                    config.sensors.forEach(sensor => { update[sensor] = parseFloat(raw_data[sensor] || 0); });
-                    config.actuators.forEach(act => { update[act] = parseFloat(raw_data[act] || 0); });
-                    return update;
-                });
+        const rawData = msg.raw_data || {};
+        const stageStatus = (msg.stages || []).find((stage) => stage.stage === stageKey);
+        if (!stageStatus) return;
 
-                setChartData(prev => {
-                    const next = { ...prev };
-                    config.sensors.forEach(sensor => {
-                        const rawVal = parseFloat(raw_data[sensor] || 0);
-                        const arr = [...(prev[sensor] || []), { t, value: rawVal, isAnomaly: stageStatus.is_anomaly }];
-                        next[sensor] = arr.slice(-MAX_CHART_POINTS);
-                    });
-                    return next;
-                });
+        tickRef.current += 1;
+        const t = tickRef.current;
 
-                setStatus({
-                    isAnomaly: stageStatus.is_anomaly,
-                    message: stageStatus.is_anomaly ? 'CÓ BẤT THƯỜNG' : 'HOẠT ĐỘNG BÌNH THƯỜNG'
-                });
-            }
-        }
-    }, [stageKey, config]);
+        setCurrentData(() => {
+            const next = {};
+            [...config.sensors, ...config.actuators].forEach((field) => {
+                next[field] = parseNumericValue(rawData[field]);
+            });
+            return next;
+        });
+
+        setChartData((prev) => {
+            const next = { ...prev };
+
+            config.sensors.forEach((sensor) => {
+                const value = parseNumericValue(rawData[sensor]);
+                if (value === null) return;
+
+                const series = [...(prev[sensor] || []), { t, value, isAnomaly: stageStatus.is_anomaly }];
+                next[sensor] = series.slice(-MAX_CHART_POINTS);
+            });
+
+            return next;
+        });
+
+        setStatus({
+            isAnomaly: stageStatus.is_anomaly,
+            message: stageStatus.is_anomaly ? 'CÓ BẤT THƯỜNG' : 'HOẠT ĐỘNG BÌNH THƯỜNG',
+        });
+    }, [config, stageKey]);
 
     useWebSocket({ onMessage: handleMessage });
 
@@ -78,18 +102,46 @@ export default function StagePage() {
         return (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                 <header className="page-header">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span className="page-title" style={{ color: 'var(--text-muted)' }}>Tổng quan</span>
                         <span className="material-symbols-outlined" style={{ fontSize: 18, color: 'var(--text-muted)' }}>chevron_right</span>
                         <h1 className="page-title">{stageKey} - {config.name}</h1>
                     </div>
                 </header>
 
-                <div className="page-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-surface)', padding: '64px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-sm)' }}>
+                <div className="page-container">
+                    <div
+                        className="card"
+                        style={{
+                            marginBottom: 24,
+                            padding: 32,
+                            textAlign: 'center',
+                            color: 'var(--text-muted)',
+                        }}
+                    >
                         <span className="material-symbols-outlined" style={{ fontSize: 64, marginBottom: 16, opacity: 0.5 }}>block</span>
-                        <h2 style={{ fontSize: '1.4rem', marginBottom: 12, color: 'var(--text-primary)' }}>Giai đoạn này không được AI giám sát</h2>
-                        <p style={{ fontSize: '1rem', lineHeight: 1.6, maxWidth: 400, margin: '0 auto' }}>Hệ thống ML (Machine Learning) không thu thập và dự đoán bất thường đối với thông số của giai đoạn <strong>{stageKey}</strong>.</p>
+                        <h2 style={{ fontSize: '1.4rem', marginBottom: 12, color: 'var(--text-primary)' }}>
+                            Giai đoạn này không được AI giám sát
+                        </h2>
+                        <p style={{ fontSize: '1rem', lineHeight: 1.6, maxWidth: 560, margin: '0 auto' }}>
+                            Backend mới không còn trả kết quả giám sát AI cho <strong>{stageKey}</strong>.
+                            UI vẫn hiển thị đầy đủ danh sách cảm biến và thiết bị chấp hành thuộc giai đoạn này.
+                        </p>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24 }}>
+                        <DeviceListCard
+                            title="Cảm biến thuộc giai đoạn"
+                            icon="sensors"
+                            items={config.sensors}
+                            emptyMessage="Không có cảm biến nào được cấu hình cho giai đoạn này."
+                        />
+                        <DeviceListCard
+                            title="Thiết bị chấp hành"
+                            icon="tune"
+                            items={config.actuators}
+                            emptyMessage="Không có thiết bị chấp hành nào được cấu hình cho giai đoạn này."
+                        />
                     </div>
                 </div>
             </div>
@@ -99,7 +151,7 @@ export default function StagePage() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <header className="page-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span className="page-title" style={{ color: 'var(--text-muted)' }}>Tổng quan</span>
                     <span className="material-symbols-outlined" style={{ fontSize: 18, color: 'var(--text-muted)' }}>chevron_right</span>
                     <h1 className="page-title">{stageKey} - {config.name}</h1>
@@ -112,21 +164,23 @@ export default function StagePage() {
                         label="TRẠNG THÁI GIAI ĐOẠN"
                         value={status.message}
                         valColor={status.isAnomaly ? 'critical' : 'normal'}
-                        sub={`Tổng cảm biến: ${config.sensors.length}`}
+                        sub={`Cảm biến: ${config.sensors.length} | Thiết bị chấp hành: ${config.actuators.length}`}
                         icon="network_check"
                         iconColor={status.isAnomaly ? 'red' : 'green'}
                     />
                 </div>
 
                 <div className="card" style={{ marginBottom: 24, padding: 24 }}>
-                    <h3 className="card-title" style={{ marginBottom: 16 }}>Nhóm Cảm biến Liên tục</h3>
+                    <h3 className="card-title" style={{ marginBottom: 16 }}>Nhóm cảm biến liên tục</h3>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
-                        {config.sensors.map(sensor => (
+                        {config.sensors.map((sensor) => (
                             <div key={sensor} style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 16 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
                                     <div style={{ fontWeight: 600 }}>{sensor}</div>
                                     <div style={{ color: status.isAnomaly ? 'var(--color-critical)' : 'var(--text-primary)', fontWeight: 700 }}>
-                                        {currentData[sensor] !== undefined ? currentData[sensor].toFixed(2) : '--'}
+                                        {currentData[sensor] !== null && currentData[sensor] !== undefined
+                                            ? currentData[sensor].toFixed(2)
+                                            : '--'}
                                     </div>
                                 </div>
                                 <SensorChart
@@ -141,24 +195,47 @@ export default function StagePage() {
                 </div>
 
                 <div className="card" style={{ padding: 24 }}>
-                    <h3 className="card-title" style={{ marginBottom: 16 }}>Nhóm Thiết bị Chấp hành (Bơm/Van)</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-                        {config.actuators.map(act => {
-                            const val = currentData[act];
-                            const isActive = val && val > 0;
+                    <h3 className="card-title" style={{ marginBottom: 16 }}>Nhóm thiết bị chấp hành (Bơm/Van)</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+                        {config.actuators.map((actuator) => {
+                            const value = currentData[actuator];
+                            const isActive = value !== null && value !== undefined && value > 0;
+
                             return (
-                                <div key={act} style={{ 
-                                    border: `1px solid ${isActive ? 'var(--color-normal)' : 'var(--border-subtle)'}`, 
-                                    borderRadius: 8, padding: 16, display: 'flex', alignItems: 'center', gap: 12,
-                                    background: isActive ? '#f0fdf4' : 'transparent'
-                                }}>
-                                    <div style={{
-                                        width: 12, height: 12, borderRadius: '50%',
-                                        background: isActive ? 'var(--color-normal)' : 'var(--border-card)',
-                                        boxShadow: isActive ? '0 0 8px var(--color-normal)' : 'none'
-                                    }} />
-                                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{act}</div>
-                                    <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: isActive ? 'var(--color-normal)' : 'var(--text-muted)' }}>
+                                <div
+                                    key={actuator}
+                                    style={{
+                                        border: `1px solid ${isActive ? 'var(--color-normal)' : 'var(--border-subtle)'}`,
+                                        borderRadius: 8,
+                                        padding: 16,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 12,
+                                        background: isActive ? '#f0fdf4' : 'transparent',
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            width: 12,
+                                            height: 12,
+                                            borderRadius: '50%',
+                                            background: isActive ? 'var(--color-normal)' : 'var(--border-card)',
+                                            boxShadow: isActive ? '0 0 8px var(--color-normal)' : 'none',
+                                        }}
+                                    />
+                                    <div>
+                                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{actuator}</div>
+                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                            Giá trị hiện tại: {value !== null && value !== undefined ? value.toFixed(2) : '--'}
+                                        </div>
+                                    </div>
+                                    <div
+                                        style={{
+                                            marginLeft: 'auto',
+                                            fontSize: '0.8rem',
+                                            color: isActive ? 'var(--color-normal)' : 'var(--text-muted)',
+                                        }}
+                                    >
                                         {isActive ? 'HOẠT ĐỘNG' : 'TẮT'}
                                     </div>
                                 </div>

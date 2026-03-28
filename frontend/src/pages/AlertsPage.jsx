@@ -61,7 +61,7 @@ export default function AlertsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             {/* Page Header */}
             <header className="page-header">
-                <h1 className="page-title">Nhật ký Sự cố</h1>
+                <h1 className="page-title">Nhật ký sự cố</h1>
                 <div className="header-actions">
                     <div className="search-bar">
                         <span className="material-symbols-outlined" style={{ color: 'var(--text-muted)', fontSize: 18 }}>search</span>
@@ -226,10 +226,10 @@ export default function AlertsPage() {
                             <div style={{ padding: '20px' }}>
                                 {/* Mockup chart bars */}
                                 {[
-                                    { name: 'Cấp nước thô (P1)', val: 32, p: '100%', color: 'var(--accent-primary)' },
-                                    { name: 'Khử sắt & Mangan (P2)', val: 25, p: '78%', color: 'var(--color-medium)' },
-                                    { name: 'Bể lọc cát (P3)', val: 18, p: '56%', color: 'var(--border-subtle)' },
-                                    { name: 'Khử clo dư (P4)', val: 12, p: '37%', color: 'var(--border-subtle)' },
+                                    { name: 'Khu clo va tham thau nguoc (P4)', val: 32, p: '100%', color: 'var(--accent-primary)' },
+                                    { name: 'Lam sach he thong (P6)', val: 24, p: '75%', color: 'var(--color-medium)' },
+                                    { name: 'Xu ly hoa chat (P2)', val: 19, p: '59%', color: 'var(--border-subtle)' },
+                                    { name: 'Thu hoi nuoc sach (P5)', val: 14, p: '44%', color: 'var(--border-subtle)' },
                                 ].map((bar, i) => (
                                     <div key={i} style={{ marginBottom: 12 }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: 4 }}>
@@ -269,3 +269,5 @@ export default function AlertsPage() {
         </div>
     );
 }
+
+
