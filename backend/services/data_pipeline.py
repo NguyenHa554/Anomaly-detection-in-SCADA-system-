@@ -8,11 +8,14 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from backend.services.anomaly_detector import detector, STAGE_FEATURES
-from backend.services.alert_service import alert_service, get_severity
+from backend.services.alert_service import alert_service, get_alert_type
 from backend.database import SensorReading, Anomaly
 
 ALL_FEATURES = tuple(dict.fromkeys(feature for cols in STAGE_FEATURES.values() for feature in cols))
 LAST_KNOWN_VALUES: Dict[str, float] = {}
+LAST_ANOMALY_STATES: Dict[str, bool] = {
+    stage: False for stage in STAGE_FEATURES
+}
 STAGE_DISPLAY_FIELDS = {
     "P2": {
         "sensors": ["AIT 201", "AIT 202", "FIT 201"],
@@ -69,6 +72,8 @@ def _normalise_row(row: Dict) -> Dict[str, float]:
 
 def reset_runtime_state():
     LAST_KNOWN_VALUES.clear()
+    for stage in LAST_ANOMALY_STATES:
+        LAST_ANOMALY_STATES[stage] = False
 
 
 async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
@@ -88,6 +93,10 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
         detector.add_data_point(stage, features)
         result = detector.predict(stage)
         result["timestamp"] = timestamp.isoformat()
+        is_anomaly = bool(result.get("is_anomaly", False))
+        is_episode_start = is_anomaly and not LAST_ANOMALY_STATES.get(stage, False)
+        LAST_ANOMALY_STATES[stage] = is_anomaly
+        result["is_episode_start"] = is_episode_start
         display_fields = STAGE_DISPLAY_FIELDS.get(stage, {"sensors": [], "actuators": []})
         sensor_values = {name: feature_row[name] for name in display_fields["sensors"] if name in feature_row}
         actuator_values = {name: feature_row[name] for name in display_fields["actuators"] if name in feature_row}
@@ -98,21 +107,21 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
             timestamp       = timestamp,
             stage           = stage,
             z_score         = result.get("max_z_score"),
-            is_anomaly      = result.get("is_anomaly", False),
+            is_anomaly      = is_anomaly,
             sensor_values   = sensor_values,
             actuator_values = actuator_values,
             raw_values      = raw_values,
         )
         db.add(reading)
 
-        if result.get("status") == "ok" and result.get("is_anomaly"):
+        if result.get("status") == "ok" and is_episode_start:
             anomaly = Anomaly(
                 timestamp     = timestamp,
                 stage         = stage,
                 anomaly_score = result["anomaly_score"],
                 max_z_score   = result["max_z_score"],
                 threshold     = result["threshold"],
-                severity      = get_severity(result["anomaly_score"]),
+                severity      = get_alert_type(True),
                 details       = {
                     "sensor_values": sensor_values,
                     "actuator_values": actuator_values,
@@ -122,10 +131,10 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
             db.add(anomaly)
 
         # Maybe generate an alert
-        if result.get("status") == "ok" and result.get("is_anomaly"):
+        if result.get("status") == "ok" and is_episode_start:
             alert_dict = alert_service.process(result, db)
             if alert_dict:
-                await broadcast_fn({"type": "alert", "data": alert_dict})
+                await broadcast_fn({"type": "alert", "alert": alert_dict})
 
         stage_results.append(result)
 

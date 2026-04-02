@@ -17,6 +17,9 @@ export default function Dashboard() {
     const [scores, setScores] = useState(
         Object.fromEntries(STAGES.map((stage) => [stage, null]))
     );
+    const [anomalyStates, setAnomalyStates] = useState(
+        Object.fromEntries(STAGES.map((stage) => [stage, false]))
+    );
     const [alerts, setAlerts] = useState([]);
     const tickRef = useRef(0);
 
@@ -27,16 +30,24 @@ export default function Dashboard() {
             const t = tickRef.current;
 
             const newScores = {};
+            const newAnomalyStates = {};
             stages.forEach((stage) => {
-                newScores[stage.stage] = stage.max_z_score;
+                newScores[stage.stage] = Number.isFinite(stage.max_z_score) ? stage.max_z_score : null;
+                newAnomalyStates[stage.stage] = Boolean(stage.is_anomaly);
             });
             setScores((prev) => ({ ...prev, ...newScores }));
+            setAnomalyStates((prev) => ({ ...prev, ...newAnomalyStates }));
 
             setChartData((prev) => {
                 const next = { ...prev };
                 stages.forEach((stage) => {
+                    const score = Number.isFinite(stage.max_z_score) ? stage.max_z_score : null;
+                    if (score == null) return;
                     if (!next[stage.stage]) next[stage.stage] = [];
-                    const series = [...next[stage.stage], { t, score: stage.max_z_score }];
+                    const series = [
+                        ...next[stage.stage],
+                        { t, score, isAnomaly: Boolean(stage.is_anomaly) },
+                    ];
                     next[stage.stage] = series.slice(-MAX_CHART_POINTS);
                 });
                 return next;
@@ -75,7 +86,7 @@ export default function Dashboard() {
 
     const activeAlerts = alerts.filter((alert) => !alert.acknowledged).length;
     const anomalousStages = MONITORED_STAGES.filter(
-        (stage) => scores[stage] != null && scores[stage] >= STAGE_CONFIG[stage].threshold
+        (stage) => Boolean(anomalyStates[stage])
     );
     const hasAnomaly = anomalousStages.length > 0;
 
@@ -85,7 +96,13 @@ export default function Dashboard() {
         return scores[stage] > scores[highest] ? stage : highest;
     }, null);
 
-    const chartStage = highestRiskStage || MONITORED_STAGES[0];
+    const highestRiskAnomalousStage = anomalousStages.reduce((highest, stage) => {
+        if (scores[stage] == null) return highest;
+        if (!highest) return stage;
+        return scores[stage] > scores[highest] ? stage : highest;
+    }, null);
+
+    const chartStage = highestRiskAnomalousStage || highestRiskStage || MONITORED_STAGES[0];
     const chartStageConfig = STAGE_CONFIG[chartStage];
     const chartScore = scores[chartStage];
 
@@ -152,9 +169,8 @@ export default function Dashboard() {
 
                     <div className="stage-nodes-wrapper">
                         {STAGES.map((stage) => {
-                            const { threshold, name, monitored } = STAGE_CONFIG[stage];
-                            const score = scores[stage];
-                            const isCritical = monitored && score != null && score >= threshold;
+                            const { name, monitored } = STAGE_CONFIG[stage];
+                            const isCritical = monitored && Boolean(anomalyStates[stage]);
 
                             return (
                                 <StageIndicator

@@ -7,7 +7,7 @@ function formatTime(ts) {
 }
 
 export default function AlertCard({ alert, onAcknowledged }) {
-    const sev = (alert.severity || 'LOW').toLowerCase();
+    const sev = (alert.severity || 'DANGER').toLowerCase();
     const acked = alert.acknowledged;
 
     async function handleAck() {
@@ -24,10 +24,10 @@ export default function AlertCard({ alert, onAcknowledged }) {
             <div className="alert-card-header">
                 <div>
                     <span className={`severity-badge ${sev}`}>
-                        {alert.severity || 'WARNING'}
+                        {alert.severity || 'DANGER'}
                     </span>
                 </div>
-                <div className="alert-time">{formatTime(alert.timestamp)}</div>
+                <div className="alert-time">{formatTime(alert.created_at || alert.timestamp)}</div>
             </div>
 
             <div>
@@ -35,7 +35,7 @@ export default function AlertCard({ alert, onAcknowledged }) {
                     {alert.message ? alert.message.split(' at ')[0] : 'Sự cố bất thường'}
                 </div>
                 <div className="alert-msg-desc">
-                    Value {alert.z_score ? Number(alert.z_score).toFixed(1) : ''} PSI exceeds threshold ({alert.threshold || 2.0} PSI).
+                    Confirmed episode start. Max z-score {alert.max_z_score != null ? Number(alert.max_z_score).toFixed(2) : '—'} over threshold ({alert.threshold || 2.0}).
                 </div>
             </div>
 

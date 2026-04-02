@@ -667,6 +667,7 @@ body {
 }
 
 .severity-badge.critical { background: var(--color-critical); color: #fff; }
+.severity-badge.danger { background: var(--color-critical); color: #fff; }
 .severity-badge.high { background: var(--color-high); color: #fff; }
 .severity-badge.medium { background: var(--color-medium); color: #fff; }
 .severity-badge.low { background: #e0f2fe; color: #0284c7; }

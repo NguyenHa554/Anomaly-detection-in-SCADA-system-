@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Download } from 'lucide-react';
 import { getAlerts, acknowledgeAlert } from '../services/api';
 
-const SEVERITIES = ['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+const SEVERITIES = ['ALL', 'DANGER'];
 const STAGES = ['ALL', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
 
 function formatDateTime(ts) {
@@ -135,7 +135,7 @@ export default function AlertsPage() {
                                     onChange={e => setFilterSev(e.target.value)}
                                     style={{ padding: '6px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)', background: 'var(--bg-base)', outline: 'none' }}
                                 >
-                                    {SEVERITIES.map(s => <option key={s} value={s}>{s === 'ALL' ? 'Mức độ (Tất cả)' : s}</option>)}
+                                    {SEVERITIES.map(s => <option key={s} value={s}>{s === 'ALL' ? 'Loai (Tat ca)' : s}</option>)}
                                 </select>
                                 <select
                                     value={filterStage}
@@ -158,7 +158,7 @@ export default function AlertsPage() {
                                         <tr>
                                             <th>Thời gian</th>
                                             <th>Khu vực</th>
-                                            <th>Mức độ</th>
+                                            <th>Loai</th>
                                             <th>Trạng thái</th>
                                             <th>Người xử lý</th>
                                         </tr>
@@ -166,14 +166,14 @@ export default function AlertsPage() {
                                     <tbody>
                                         {filtered.map(a => (
                                             <tr key={a.id}>
-                                                <td>{formatDateTime(a.timestamp)}</td>
+                                                <td>{formatDateTime(a.created_at || a.timestamp)}</td>
                                                 <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
                                                     Sự cố {a.stage}<br />
                                                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400 }}>{a.message?.split(' at ')[0] || `Anomaly detected`}</span>
                                                 </td>
                                                 <td>
-                                                    <span className={`severity-badge ${(a.severity || 'LOW').toLowerCase()}`}>
-                                                        {a.severity || 'LOW'}
+                                                    <span className={`severity-badge ${(a.severity || 'DANGER').toLowerCase()}`}>
+                                                        {a.severity || 'DANGER'}
                                                     </span>
                                                 </td>
                                                 <td>

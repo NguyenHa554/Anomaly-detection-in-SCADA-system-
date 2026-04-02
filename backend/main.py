@@ -51,6 +51,7 @@ manager = ConnectionManager()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_tables()
+    reset_runtime_state()
     try:
         detector.load()
         print("Models loaded successfully.")
