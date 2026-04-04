@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { getStatus, getAlerts } from '../services/api';
 import StatusCard from '../components/StatusCard';
@@ -8,6 +8,9 @@ import AlertPanel from '../components/AlertPanel';
 import { STAGE_CONFIG, STAGES, MONITORED_STAGES } from '../constants/stages';
 
 const MAX_CHART_POINTS = 120;
+const INITIAL_WARMING_STATES = Object.fromEntries(
+    STAGES.map((stage) => [stage, Boolean(STAGE_CONFIG[stage]?.monitored)])
+);
 
 export default function Dashboard() {
     const [status, setStatus] = useState(null);
@@ -20,6 +23,7 @@ export default function Dashboard() {
     const [anomalyStates, setAnomalyStates] = useState(
         Object.fromEntries(STAGES.map((stage) => [stage, false]))
     );
+    const [warmingStates, setWarmingStates] = useState(INITIAL_WARMING_STATES);
     const [alerts, setAlerts] = useState([]);
     const tickRef = useRef(0);
 
@@ -29,23 +33,27 @@ export default function Dashboard() {
             tickRef.current += 1;
             const t = tickRef.current;
 
-            const newScores = {};
-            const newAnomalyStates = {};
+            const nextScores = {};
+            const nextAnomalyStates = {};
+            const nextWarmingStates = {};
+
             stages.forEach((stage) => {
-                newScores[stage.stage] = Number.isFinite(stage.max_z_score) ? stage.max_z_score : null;
-                newAnomalyStates[stage.stage] = Boolean(stage.is_anomaly);
+                nextScores[stage.stage] = Number.isFinite(stage.max_z_score) ? stage.max_z_score : null;
+                nextAnomalyStates[stage.stage] = Boolean(stage.is_anomaly);
+                nextWarmingStates[stage.stage] = stage.status === 'warming_up';
             });
-            setScores((prev) => ({ ...prev, ...newScores }));
-            setAnomalyStates((prev) => ({ ...prev, ...newAnomalyStates }));
+
+            setScores((prev) => ({ ...prev, ...nextScores }));
+            setAnomalyStates((prev) => ({ ...prev, ...nextAnomalyStates }));
+            setWarmingStates((prev) => ({ ...prev, ...nextWarmingStates }));
 
             setChartData((prev) => {
                 const next = { ...prev };
                 stages.forEach((stage) => {
                     const score = Number.isFinite(stage.max_z_score) ? stage.max_z_score : null;
                     if (score == null) return;
-                    if (!next[stage.stage]) next[stage.stage] = [];
                     const series = [
-                        ...next[stage.stage],
+                        ...(next[stage.stage] || []),
                         { t, score, isAnomaly: Boolean(stage.is_anomaly) },
                     ];
                     next[stage.stage] = series.slice(-MAX_CHART_POINTS);
@@ -78,6 +86,16 @@ export default function Dashboard() {
         return () => clearInterval(id);
     }, [connected]);
 
+    const effectiveWarmingStates = useMemo(() => {
+        const next = { ...warmingStates };
+        if (!status?.stages) return next;
+        MONITORED_STAGES.forEach((stage) => {
+            const stageStatus = status.stages?.[stage];
+            next[stage] = stageStatus ? !stageStatus.ready : next[stage];
+        });
+        return next;
+    }, [status, warmingStates]);
+
     const handleAcknowledged = useCallback((id) => {
         setAlerts((prev) => prev.map((alert) => (
             alert.id === id ? { ...alert, acknowledged: true } : alert
@@ -85,10 +103,12 @@ export default function Dashboard() {
     }, []);
 
     const activeAlerts = alerts.filter((alert) => !alert.acknowledged).length;
-    const anomalousStages = MONITORED_STAGES.filter(
-        (stage) => Boolean(anomalyStates[stage])
+    const anomalousStages = MONITORED_STAGES.filter((stage) => Boolean(anomalyStates[stage]));
+    const warmingStages = MONITORED_STAGES.filter(
+        (stage) => !anomalyStates[stage] && Boolean(effectiveWarmingStates[stage])
     );
     const hasAnomaly = anomalousStages.length > 0;
+    const hasWarming = warmingStages.length > 0;
 
     const highestRiskStage = MONITORED_STAGES.reduce((highest, stage) => {
         if (scores[stage] == null) return highest;
@@ -106,20 +126,24 @@ export default function Dashboard() {
     const chartStageConfig = STAGE_CONFIG[chartStage];
     const chartScore = scores[chartStage];
 
-    const displaySystemStatus = hasAnomaly ? 'ĐANG CÓ SỰ CỐ' : 'BÌNH THƯỜNG';
-    const displayStatusColor = hasAnomaly ? 'critical' : 'normal';
-    const displayAlertCountStr = activeAlerts > 0 ? `${activeAlerts} Cảnh báo` : 'Không có cảnh báo';
-    const displayAlertSub = 'Đang chờ xử lý trong 24h qua';
+    const systemStatusValue = hasAnomaly ? 'DANGER' : hasWarming ? 'WARMING UP' : 'NORMAL';
+    const systemStatusColor = hasAnomaly ? 'critical' : hasWarming ? 'warning' : 'normal';
+    const systemStatusSub = hasAnomaly
+        ? `Confirmed anomaly at stage ${anomalousStages[0] || chartStage}`
+        : hasWarming
+            ? `Model warming up at stage ${warmingStages[0]}`
+            : 'All monitored stages are ready';
+    const alertCountValue = activeAlerts > 0 ? `${activeAlerts} alerts` : 'No active alerts';
     const blockedCount = status?.detections_today ?? 12;
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <header className="page-header">
-                <h1 className="page-title">Hệ thống xử lý nước SWaT</h1>
+                <h1 className="page-title">SWaT Water Treatment System</h1>
                 <div className="header-actions">
                     <div className="search-bar">
                         <span className="material-symbols-outlined" style={{ color: 'var(--text-muted)', fontSize: 18 }}>search</span>
-                        <input type="text" placeholder="Tìm kiếm cảm biến..." />
+                        <input type="text" placeholder="Search sensors..." />
                     </div>
                     <button className="header-icon-btn">
                         <span className="material-symbols-outlined">notifications</span>
@@ -131,26 +155,26 @@ export default function Dashboard() {
             <div className="page-container">
                 <div className="status-cards-grid">
                     <StatusCard
-                        label="TRẠNG THÁI HỆ THỐNG"
-                        value={displaySystemStatus}
-                        valColor={displayStatusColor}
-                        sub={`Phát hiện bất thường tại Giai đoạn ${anomalousStages[0] || chartStage}`}
+                        label="SYSTEM STATUS"
+                        value={systemStatusValue}
+                        valColor={systemStatusColor}
+                        sub={systemStatusSub}
                         icon="activity_zone"
-                        iconColor={hasAnomaly ? 'red' : 'green'}
+                        iconColor={hasAnomaly ? 'red' : hasWarming ? 'orange' : 'green'}
                     />
                     <StatusCard
-                        label="CẢNH BÁO HỆ THỐNG"
-                        value={displayAlertCountStr}
+                        label="ALERTS"
+                        value={alertCountValue}
                         valColor="neutral"
-                        sub={displayAlertSub}
+                        sub="Confirmed episode starts in the last 24h"
                         icon="warning"
                         iconColor="blue"
                     />
                     <StatusCard
-                        label="HIỆU SUẤT VẬN HÀNH"
+                        label="OPERATION"
                         value="Uptime: 99.8%"
                         valColor="neutral"
-                        sub={<span>Sự cố đã chặn: <strong>{blockedCount}</strong></span>}
+                        sub={<span>Blocked incidents: <strong>{blockedCount}</strong></span>}
                         icon="bolt"
                         iconColor="green"
                     />
@@ -160,10 +184,10 @@ export default function Dashboard() {
                     <div className="stage-flow-header">
                         <h2 className="stage-flow-title">
                             <span className="material-symbols-outlined" style={{ color: 'var(--accent-primary)' }}>account_tree</span>
-                            Sơ đồ quy trình vận hành
+                            Operating pipeline
                         </h2>
                         <span className="stage-updated-time">
-                            Cập nhật lúc: {new Date().toLocaleTimeString('vi-VN')}
+                            Updated: {new Date().toLocaleTimeString('vi-VN')}
                         </span>
                     </div>
 
@@ -171,6 +195,7 @@ export default function Dashboard() {
                         {STAGES.map((stage) => {
                             const { name, monitored } = STAGE_CONFIG[stage];
                             const isCritical = monitored && Boolean(anomalyStates[stage]);
+                            const isWarming = monitored && !isCritical && Boolean(effectiveWarmingStates[stage]);
 
                             return (
                                 <StageIndicator
@@ -178,6 +203,7 @@ export default function Dashboard() {
                                     stage={stage}
                                     name={name}
                                     isCritical={isCritical}
+                                    isWarming={isWarming}
                                     isMonitored={monitored}
                                 />
                             );
@@ -189,7 +215,7 @@ export default function Dashboard() {
                     <div className="card">
                         <div className="card-header">
                             <div>
-                                <h3 className="card-title">Biểu đồ áp suất - Giai đoạn {chartStage}</h3>
+                                <h3 className="card-title">Z-score trend - Stage {chartStage}</h3>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
                                     {chartStageConfig.name}
                                 </div>
@@ -210,7 +236,7 @@ export default function Dashboard() {
                         <div className="card-header">
                             <h3 className="card-title">
                                 <span className="material-symbols-outlined" style={{ color: 'var(--color-critical)' }}>history</span>
-                                Nhật ký cảnh báo
+                                Alert log
                             </h3>
                         </div>
                         <AlertPanel alerts={alerts} onAcknowledged={handleAcknowledged} />

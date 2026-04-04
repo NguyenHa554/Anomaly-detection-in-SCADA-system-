@@ -17,7 +17,7 @@ async function request(path, options = {}) {
 
 // ─── Endpoints ────────────────────────────────────────────────────────────────
 
-/** GET /api/status → { status, active_alerts, detections_today, uptime_seconds } */
+/** GET /api/status → { model_loaded,  loaded_stages, stages, server_time} */
 export const getStatus = () => request('/api/status');
 
 /** GET /api/alerts */

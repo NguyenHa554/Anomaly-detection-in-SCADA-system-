@@ -135,7 +135,7 @@ export default function AlertsPage() {
                                     onChange={e => setFilterSev(e.target.value)}
                                     style={{ padding: '6px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)', background: 'var(--bg-base)', outline: 'none' }}
                                 >
-                                    {SEVERITIES.map(s => <option key={s} value={s}>{s === 'ALL' ? 'Loai (Tat ca)' : s}</option>)}
+                                    {SEVERITIES.map(s => <option key={s} value={s}>{s === 'ALL' ? 'Loại (Tất cả)' : s}</option>)}
                                 </select>
                                 <select
                                     value={filterStage}

@@ -546,10 +546,24 @@ body {
   background: #fef2f2;
 }
 
+.stage-node.warning .stage-node-icon-wrap {
+  border-color: var(--color-medium);
+  color: var(--color-medium);
+  background: #fff7ed;
+}
+
 /* The red highlight box for anomalous stage */
 .stage-node.critical .stage-info-box {
   border: 2px solid var(--color-critical);
   background: #fef2f2;
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  margin-top: -8px;
+}
+
+.stage-node.warning .stage-info-box {
+  border: 2px solid var(--color-medium);
+  background: #fff7ed;
   border-radius: var(--radius-sm);
   padding: 8px;
   margin-top: -8px;
@@ -567,6 +581,10 @@ body {
 
 .stage-node.critical .stage-p-label {
   color: var(--color-critical);
+}
+
+.stage-node.warning .stage-p-label {
+  color: var(--color-medium);
 }
 
 .stage-desc {
