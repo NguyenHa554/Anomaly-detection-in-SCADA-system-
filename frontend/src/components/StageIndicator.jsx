@@ -1,6 +1,6 @@
 export default function StageIndicator({ stage, name, isCritical, isWarming = false, isMonitored = true }) {
     const statusClass = isCritical ? 'critical' : isWarming ? 'warning' : 'normal';
-    const iconName = !isMonitored ? 'block' : isCritical ? 'warning' : isWarming ? 'schedule' : 'check_circle';
+    const iconName = !isMonitored ? 'monitoring' : isCritical ? 'warning' : isWarming ? 'schedule' : 'check_circle';
 
     return (
         <div className={`stage-node ${statusClass}`}>
@@ -14,7 +14,7 @@ export default function StageIndicator({ stage, name, isCritical, isWarming = fa
                 <div className="stage-desc">{name}</div>
                 {!isMonitored && (
                     <span className="stage-critical-text" style={{ color: 'var(--text-muted)' }}>
-                        KHONG GIAM SAT AI
+                        MONITORING ONLY
                     </span>
                 )}
                 {isMonitored && isWarming && !isCritical && (

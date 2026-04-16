@@ -12,6 +12,7 @@ from backend.services.alert_service import alert_service, get_alert_type
 from backend.database import SensorReading, Anomaly
 
 ALL_FEATURES = tuple(dict.fromkeys(feature for cols in STAGE_FEATURES.values() for feature in cols))
+ALERTING_STAGES = tuple(stage for stage in STAGE_FEATURES if stage != "P6")
 LAST_KNOWN_VALUES: Dict[str, float] = {}
 LAST_ANOMALY_STATES: Dict[str, bool] = {
     stage: False for stage in STAGE_FEATURES
@@ -92,6 +93,7 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
 
         detector.add_data_point(stage, features)
         result = detector.predict(stage)
+        result["contributes_to_overall_alert"] = stage in ALERTING_STAGES
         result["timestamp"] = timestamp.isoformat()
         is_anomaly = bool(result.get("is_anomaly", False))
         is_episode_start = is_anomaly and not LAST_ANOMALY_STATES.get(stage, False)
@@ -130,8 +132,12 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
             )
             db.add(anomaly)
 
-        # Maybe generate an alert
-        if result.get("status") == "ok" and is_episode_start:
+        # Only production stages contribute to final alerts. P6 remains visible for analysis.
+        if (
+            result.get("status") == "ok"
+            and is_episode_start
+            and stage in ALERTING_STAGES
+        ):
             alert_dict = alert_service.process(result, db)
             if alert_dict:
                 await broadcast_fn({"type": "alert", "alert": alert_dict})
@@ -140,8 +146,11 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
 
     db.commit()
 
-    # Ensemble: overall anomaly if ANY stage fires
-    overall = any(r.get("is_anomaly", False) for r in stage_results)
+    # Ensemble: overall anomaly if any production stage fires.
+    overall = any(
+        r.get("is_anomaly", False) and r.get("contributes_to_overall_alert", False)
+        for r in stage_results
+    )
 
     payload = {
         "type":            "sensor_update",

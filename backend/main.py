@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
-from backend.database import create_tables, get_db, Alert
+from backend.database import create_tables, get_db, Alert, clear_runtime_data
 from backend.services.anomaly_detector import detector, STAGE_FEATURES
 from backend.services.data_pipeline import process_row, reset_runtime_state
 
@@ -109,6 +109,7 @@ def get_status():
         "model_loaded": detector.is_loaded,
         "loaded_stages": list(detector.loaded_stages),
         "stages":       stages,
+        "thresholds": detector.thresholds,
         "server_time":  datetime.now(timezone.utc).isoformat(),
     }
 
@@ -129,6 +130,22 @@ def reload_runtime():
     return {
         "ok": True,
         "loaded_stages": list(detector.loaded_stages),
+        "thresholds": detector.thresholds,
+        "server_time": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.post("/api/runtime/reset")
+def reset_runtime():
+    create_tables()
+    clear_runtime_data()
+    reset_runtime_state()
+    detector.load()
+    return {
+        "ok": True,
+        "message": "Runtime state and persisted alert/history data cleared.",
+        "loaded_stages": list(detector.loaded_stages),
+        "thresholds": detector.thresholds,
         "server_time": datetime.now(timezone.utc).isoformat(),
     }
 

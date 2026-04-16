@@ -40,6 +40,14 @@ export const getHistory = (stage, limit = 200) =>
 export const ingestRow = (data) =>
     request('/api/ingest', { method: 'POST', body: JSON.stringify(data) });
 
+/** POST /api/runtime/reload */
+export const reloadRuntime = () =>
+    request('/api/runtime/reload', { method: 'POST' });
+
+/** POST /api/runtime/reset */
+export const resetRuntime = () =>
+    request('/api/runtime/reset', { method: 'POST' });
+
 /** POST /api/upload-csv — multipart form */
 export const uploadCsv = async (file) => {
     const form = new FormData();

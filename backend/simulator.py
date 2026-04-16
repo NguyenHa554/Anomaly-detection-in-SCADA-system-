@@ -1,16 +1,29 @@
 """
-simulator.py — Replays SWaT.csv through the API to demonstrate real-time detection.
+simulator.py - Replays a SWaT CSV through the API to demonstrate real-time detection.
 
 Usage (separate terminal, while backend is running):
     python -m backend.simulator
+
+Optional environment variables:
+    SIM_CSV_FILE=SWaT.csv
+    SIM_DELAY=0.2
+    SIM_START_ROW=0
+    SIM_END_ROW=
 """
 
-import asyncio, aiohttp, pandas as pd
+import os
+import asyncio
 from datetime import datetime
 
-API_URL   = "http://localhost:8000"
-CSV_FILE  = "SWaT.csv"
-DELAY     = 0.2   # seconds between rows (0.2 s ≈ 5x real speed)
+import aiohttp
+import pandas as pd
+
+API_URL = "http://localhost:8000"
+CSV_FILE = os.getenv("SIM_CSV_FILE", "SWaT.csv")
+DELAY = float(os.getenv("SIM_DELAY", "0.2"))
+START_ROW = int(os.getenv("SIM_START_ROW", "0"))
+END_ROW_RAW = os.getenv("SIM_END_ROW", "").strip()
+END_ROW = int(END_ROW_RAW) if END_ROW_RAW else None
 
 
 def load_data() -> pd.DataFrame:
@@ -24,7 +37,6 @@ def load_data() -> pd.DataFrame:
     parsed_ts = pd.to_datetime(df[ts_col], format="ISO8601", errors="coerce", utc=True)
     df = df.loc[parsed_ts.notna()].copy()
 
-    # Encode Active/Inactive
     for col in df.columns:
         if df[col].astype(str).str.contains("Active|Inactive", case=False, na=False).any():
             df[col] = df[col].map({"Active": 1, "Inactive": 0})
@@ -51,8 +63,15 @@ def row_to_payload(row: pd.Series) -> dict:
 
 async def run():
     df = load_data()
-    print(f"Loaded {len(df)} rows from {CSV_FILE}.")
-    print("Streaming to API … (Ctrl+C to stop)\n")
+    start = max(0, START_ROW)
+    end = len(df) if END_ROW is None else min(len(df), END_ROW)
+    if start >= end:
+        raise ValueError(f"Invalid replay window: start={start}, end={end}, rows={len(df)}")
+
+    df = df.iloc[start:end].reset_index(drop=True)
+
+    print(f"Loaded {len(df)} rows from {CSV_FILE} (source rows {start}..{end - 1}).")
+    print("Streaming to API ... (Ctrl+C to stop)\n")
 
     async with aiohttp.ClientSession() as session:
         for idx, (_, row) in enumerate(df.iterrows()):

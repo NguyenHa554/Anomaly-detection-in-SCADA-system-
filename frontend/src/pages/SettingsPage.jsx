@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { STAGES, STAGE_CONFIG } from '../constants/stages';
+import { STAGES, STAGE_CONFIG, MONITORING_ONLY_STAGES } from '../constants/stages';
 
 const MOCK_USERS = [
-    { id: 1, name: 'Nguyễn Văn A', role: 'Admin', status: 'Active', initials: 'NV' },
-    { id: 2, name: 'Trần Thị B', role: 'Kỹ thuật viên', status: 'Active', initials: 'TB' },
-    { id: 3, name: 'Lê Văn C', role: 'Giám sát', status: 'Inactive', initials: 'LC' },
+    { id: 1, name: 'Nguyen Van A', role: 'Admin', status: 'Active', initials: 'NV' },
+    { id: 2, name: 'Tran Thi B', role: 'Ky thuat vien', status: 'Active', initials: 'TB' },
+    { id: 3, name: 'Le Van C', role: 'Giam sat', status: 'Inactive', initials: 'LC' },
 ];
 
 export default function SettingsPage() {
@@ -14,11 +14,11 @@ export default function SettingsPage() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <header className="page-header">
-                <h1 className="page-title">Cài đặt hệ thống</h1>
+                <h1 className="page-title">Cai dat he thong</h1>
                 <div className="header-actions">
                     <div className="search-bar">
                         <span className="material-symbols-outlined" style={{ color: 'var(--text-muted)', fontSize: 18 }}>search</span>
-                        <input type="text" placeholder="Tìm kiếm cài đặt..." />
+                        <input type="text" placeholder="Tim kiem cai dat..." />
                     </div>
                     <button className="header-icon-btn">
                         <span className="material-symbols-outlined">notifications</span>
@@ -30,14 +30,14 @@ export default function SettingsPage() {
                 <section className="settings-section">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
                         <div>
-                            <h2 className="settings-section-title">Quản lý tài khoản</h2>
+                            <h2 className="settings-section-title">Quan ly tai khoan</h2>
                             <p className="settings-section-desc" style={{ marginBottom: 0 }}>
-                                Quản lý người dùng truy cập và phân quyền hệ thống
+                                Quan ly nguoi dung truy cap va phan quyen he thong
                             </p>
                         </div>
                         <button className="btn btn-primary">
                             <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
-                            Thêm người dùng
+                            Them nguoi dung
                         </button>
                     </div>
 
@@ -45,10 +45,10 @@ export default function SettingsPage() {
                         <table className="data-table">
                             <thead>
                                 <tr>
-                                    <th>Tên người dùng</th>
-                                    <th>Vai trò</th>
-                                    <th>Trạng thái</th>
-                                    <th>Thao tác</th>
+                                    <th>Ten nguoi dung</th>
+                                    <th>Vai tro</th>
+                                    <th>Trang thai</th>
+                                    <th>Thao tac</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -93,7 +93,7 @@ export default function SettingsPage() {
                                             )}
                                         </td>
                                         <td>
-                                            <button className="btn-ghost" style={{ fontSize: '0.8rem', padding: 0 }}>Chỉnh sửa</button>
+                                            <button className="btn-ghost" style={{ fontSize: '0.8rem', padding: 0 }}>Chinh sua</button>
                                         </td>
                                     </tr>
                                 ))}
@@ -103,14 +103,14 @@ export default function SettingsPage() {
                 </section>
 
                 <section className="settings-section">
-                    <h2 className="settings-section-title">Cấu hình cảnh báo</h2>
-                    <p className="settings-section-desc">Thiết lập cách nhận thông báo khi có sự cố</p>
+                    <h2 className="settings-section-title">Cau hinh canh bao</h2>
+                    <p className="settings-section-desc">Thiet lap cach nhan thong bao khi co su co</p>
 
                     <div className="toggle-row">
                         <div>
-                            <div className="toggle-label">Gửi email khi có cảnh báo CRITICAL</div>
+                            <div className="toggle-label">Gui email khi co canh bao CRITICAL</div>
                             <div className="toggle-desc">
-                                Hệ thống sẽ tự động gửi thông báo đến các địa chỉ email đã đăng ký
+                                He thong se tu dong gui thong bao den cac dia chi email da dang ky
                             </div>
                         </div>
                         <label className="switch">
@@ -121,9 +121,9 @@ export default function SettingsPage() {
 
                     <div className="toggle-row">
                         <div>
-                            <div className="toggle-label">Bật âm thanh báo động</div>
+                            <div className="toggle-label">Bat am thanh bao dong</div>
                             <div className="toggle-desc">
-                                Phát tín hiệu âm thanh trực tiếp trên bảng điều khiển giám sát
+                                Phat tin hieu am thanh truc tiep tren bang dieu khien giam sat
                             </div>
                         </div>
                         <label className="switch">
@@ -134,25 +134,34 @@ export default function SettingsPage() {
                 </section>
 
                 <section className="settings-section">
-                    <h2 className="settings-section-title">Thông tin trạm P1-P6</h2>
-                    <p className="settings-section-desc">Trạng thái kết nối thời gian thực của các trạm điều khiển</p>
+                    <h2 className="settings-section-title">Thong tin tram P1-P6</h2>
+                    <p className="settings-section-desc">
+                        Trang thai ket noi thoi gian thuc cua cac tram dieu khien. {MONITORING_ONLY_STAGES.join(', ')} chi hien thi dashboard va phan tich, khong kich hoat canh bao cuoi.
+                    </p>
 
                     <div className="station-grid">
                         {STAGES.map((stage) => (
                             <div className="station-card" key={stage}>
                                 <span className="material-symbols-outlined">cell_tower</span>
                                 <div>
-                                    <div className="station-title">TRẠM {stage}</div>
+                                    <div className="station-title">TRAM {stage}</div>
                                     <div className="station-name">{STAGE_CONFIG[stage].name}</div>
                                 </div>
-                                <div className="station-status-badge">ĐÃ KẾT NỐI</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                                    <div className="station-status-badge">DA KET NOI</div>
+                                    {!STAGE_CONFIG[stage].monitored && (
+                                        <div style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.04em', color: 'var(--text-muted)' }}>
+                                            MONITORING ONLY
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         ))}
                     </div>
                 </section>
 
                 <div style={{ textAlign: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 48 }}>
-                    © 2026 SCADA-SECURITY Hệ thống giám sát và quản lý hạ tầng nước | v4.2.0-LTS
+                    SCADA-SECURITY 2026 | v4.2.0-LTS
                 </div>
             </div>
         </div>

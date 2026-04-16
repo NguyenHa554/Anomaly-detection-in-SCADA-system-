@@ -95,3 +95,11 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def clear_runtime_data():
+    with SessionLocal() as db:
+        db.query(Alert).delete()
+        db.query(Anomaly).delete()
+        db.query(SensorReading).delete()
+        db.commit()
