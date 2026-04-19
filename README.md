@@ -189,7 +189,17 @@ npm run lint
 
 ```bash
 docker-compose up --build
+<<<<<<< HEAD
 ```
+=======
+
+```
+### Running simulator 
+$env:SIM_START_ROW=''
+$env:SIM_END_ROW=''
+$env:SIM_DELAY=''
+python -m backend.simulator
+>>>>>>> 717f6ba (update threshold UI)
 
 ## SWaT Dataset
 
@@ -202,4 +212,8 @@ This project is for educational/research purposes.
 ## References
 
 - SWaT Dataset: https://itrust.sutd.edu.sg/itrust-labs-home datasets/swat/
+<<<<<<< HEAD
 - Related research papers on CNN-based anomaly detection for SCADA systems
+=======
+- Related research papers on CNN-based anomaly detection for SCADA systems
+>>>>>>> 717f6ba (update threshold UI)

@@ -55,24 +55,23 @@ export default function StagePage() {
     const [currentData, setCurrentData] = useState({});
     const [status, setStatus] = useState({
         mode: 'warming',
-        message: 'WARMING UP',
-        detail: 'Waiting for enough samples',
+        message: 'ĐANG KHỞI ĐỘNG',
+        detail: 'Hệ thống đang tích lũy dữ liệu',
     });
     const tickRef = useRef(0);
 
     const handleMessage = useCallback((msg) => {
-        if (!config?.monitored || msg.type !== 'sensor_update') return;
+        if (msg.type !== 'sensor_update') return;
 
         const rawData = msg.raw_data || {};
         const stageStatus = (msg.stages || []).find((stage) => stage.stage === stageKey);
-        if (!stageStatus) return;
 
         tickRef.current += 1;
         const t = tickRef.current;
 
         setCurrentData(() => {
             const next = {};
-            [...config.sensors, ...config.actuators].forEach((field) => {
+            [...(config.sensors || []), ...(config.actuators || [])].forEach((field) => {
                 next[field] = parseNumericValue(rawData[field]);
             });
             return next;
@@ -80,32 +79,42 @@ export default function StagePage() {
 
         setChartData((prev) => {
             const next = { ...prev };
-            config.sensors.forEach((sensor) => {
+            (config.sensors || []).forEach((sensor) => {
                 const value = parseNumericValue(rawData[sensor]);
                 if (value === null) return;
+                const isAnomaly = stageStatus ? Boolean(stageStatus.is_anomaly) : false;
                 const series = [
                     ...(prev[sensor] || []),
-                    { t, value, isAnomaly: Boolean(stageStatus.is_anomaly) },
+                    { t, value, isAnomaly },
                 ];
                 next[sensor] = series.slice(-MAX_CHART_POINTS);
             });
             return next;
         });
 
-        if (stageStatus.status === 'warming_up') {
+        if (!config.monitored) {
             setStatus({
-                mode: 'warming',
-                message: 'WARMING UP',
-                detail: `${stageStatus.buffer_fill || 0}/${stageStatus.buffer_needed || 0} samples ready`,
+                mode: 'normal',
+                message: 'CHƯA GIÁM SÁT',
+                detail: 'Hoạt động nhưng không có mô hình AI',
             });
             return;
         }
 
-        const isDanger = Boolean(stageStatus.is_anomaly);
+        if (stageStatus?.status === 'warming_up') {
+            setStatus({
+                mode: 'warming',
+                message: 'ĐANG KHỞI ĐỘNG',
+                detail: `${stageStatus.buffer_fill || 0}/${stageStatus.buffer_needed || 0} mẫu đã lưu`,
+            });
+            return;
+        }
+
+        const isDanger = stageStatus ? Boolean(stageStatus.is_anomaly) : false;
         setStatus({
             mode: isDanger ? 'danger' : 'normal',
-            message: isDanger ? 'DANGER' : 'NORMAL',
-            detail: isDanger ? 'Confirmed anomaly episode detected' : 'Detector ready and normal',
+            message: isDanger ? 'BẤT THƯỜNG' : 'BÌNH THƯỜNG',
+            detail: isDanger ? 'Phát hiện chuỗi tín hiệu bất thường' : 'Hệ thống đang hoạt động ổn định',
         });
     }, [config, stageKey]);
 
@@ -113,55 +122,7 @@ export default function StagePage() {
 
     if (!config) return <Navigate to="/" />;
 
-    if (!config.monitored) {
-        return (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                <header className="page-header">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="page-title" style={{ color: 'var(--text-muted)' }}>Overview</span>
-                        <span className="material-symbols-outlined" style={{ fontSize: 18, color: 'var(--text-muted)' }}>chevron_right</span>
-                        <h1 className="page-title">{stageKey} - {config.name}</h1>
-                    </div>
-                </header>
 
-                <div className="page-container">
-                    <div
-                        className="card"
-                        style={{
-                            marginBottom: 24,
-                            padding: 32,
-                            textAlign: 'center',
-                            color: 'var(--text-muted)',
-                        }}
-                    >
-                        <span className="material-symbols-outlined" style={{ fontSize: 64, marginBottom: 16, opacity: 0.5 }}>block</span>
-                        <h2 style={{ fontSize: '1.4rem', marginBottom: 12, color: 'var(--text-primary)' }}>
-                            This stage is not monitored by AI
-                        </h2>
-                        <p style={{ fontSize: '1rem', lineHeight: 1.6, maxWidth: 560, margin: '0 auto' }}>
-                            The backend does not return AI monitoring results for <strong>{stageKey}</strong>.
-                            The UI still shows the sensors and actuators assigned to this stage.
-                        </p>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24 }}>
-                        <DeviceListCard
-                            title="Stage sensors"
-                            icon="sensors"
-                            items={config.sensors}
-                            emptyMessage="No sensors configured for this stage."
-                        />
-                        <DeviceListCard
-                            title="Actuators"
-                            icon="tune"
-                            items={config.actuators}
-                            emptyMessage="No actuators configured for this stage."
-                        />
-                    </div>
-                </div>
-            </div>
-        );
-    }
 
     const statusColor = status.mode === 'danger' ? 'critical' : status.mode === 'warming' ? 'warning' : 'normal';
     const statusIconColor = status.mode === 'danger' ? 'red' : status.mode === 'warming' ? 'orange' : 'green';
@@ -170,7 +131,7 @@ export default function StagePage() {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <header className="page-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span className="page-title" style={{ color: 'var(--text-muted)' }}>Overview</span>
+                    <span className="page-title" style={{ color: 'var(--text-muted)' }}>Tổng quan</span>
                     <span className="material-symbols-outlined" style={{ fontSize: 18, color: 'var(--text-muted)' }}>chevron_right</span>
                     <h1 className="page-title">{stageKey} - {config.name}</h1>
                 </div>
@@ -179,17 +140,17 @@ export default function StagePage() {
             <div className="page-container">
                 <div style={{ marginBottom: 24 }}>
                     <StatusCard
-                        label="STAGE STATUS"
+                        label="TRẠNG THÁI GIAI ĐOẠN"
                         value={status.message}
                         valColor={statusColor}
-                        sub={`${status.detail} | Sensors: ${config.sensors.length} | Actuators: ${config.actuators.length}`}
+                        sub={`${status.detail} | Cảm biến: ${config.sensors.length} | Thiết bị: ${config.actuators.length}`}
                         icon="network_check"
                         iconColor={statusIconColor}
                     />
                 </div>
 
                 <div className="card" style={{ marginBottom: 24, padding: 24 }}>
-                    <h3 className="card-title" style={{ marginBottom: 16 }}>Continuous sensors</h3>
+                    <h3 className="card-title" style={{ marginBottom: 16 }}>Biểu đồ cảm biến liên tục</h3>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
                         {config.sensors.map((sensor) => (
                             <div key={sensor} style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 16 }}>
@@ -213,7 +174,7 @@ export default function StagePage() {
                 </div>
 
                 <div className="card" style={{ padding: 24 }}>
-                    <h3 className="card-title" style={{ marginBottom: 16 }}>Actuators</h3>
+                    <h3 className="card-title" style={{ marginBottom: 16 }}>Thiết bị chấp hành</h3>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                         {config.actuators.map((actuator) => {
                             const value = currentData[actuator];
@@ -244,7 +205,7 @@ export default function StagePage() {
                                     <div>
                                         <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{actuator}</div>
                                         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                            Current value: {value !== null && value !== undefined ? value.toFixed(2) : '--'}
+                                            Thông số hiện tại: {value !== null && value !== undefined ? value.toFixed(2) : '--'}
                                         </div>
                                     </div>
                                     <div
@@ -254,7 +215,7 @@ export default function StagePage() {
                                             color: isActive ? 'var(--color-normal)' : 'var(--text-muted)',
                                         }}
                                     >
-                                        {isActive ? 'ACTIVE' : 'OFF'}
+                                        {isActive ? 'HOẠT ĐỘNG' : 'TẮT'}
                                     </div>
                                 </div>
                             );
