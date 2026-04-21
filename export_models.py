@@ -105,7 +105,7 @@ def create_sequences(X: np.ndarray, time_steps: int = TIME_STEPS) -> Tuple[np.nd
 
 def get_stage_features(columns: Iterable[str]) -> Dict[str, list]:
     stages: Dict[str, list] = {}
-    for stage_num in [2, 3, 4, 5, 6]:
+    for stage_num in [1, 2, 3, 4, 5, 6]:
         cols = [
             c for c in columns
             if re.search(rf"\b{stage_num}\d{{2}}\b", c)

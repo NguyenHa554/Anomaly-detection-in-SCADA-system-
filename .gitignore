@@ -53,3 +53,6 @@ yarn-error.log
 
 # csv files
 *.csv
+
+#database
+*.db

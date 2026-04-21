@@ -11,13 +11,11 @@ from backend.services.anomaly_detector import detector, STAGE_FEATURES
 from backend.services.alert_service import alert_service, get_alert_type
 from backend.database import SensorReading, Anomaly
 
-ALL_FEATURES = tuple(dict.fromkeys(feature for cols in STAGE_FEATURES.values() for feature in cols))
-ALERTING_STAGES = tuple(stage for stage in STAGE_FEATURES if stage != "P6")
-LAST_KNOWN_VALUES: Dict[str, float] = {}
-LAST_ANOMALY_STATES: Dict[str, bool] = {
-    stage: False for stage in STAGE_FEATURES
-}
 STAGE_DISPLAY_FIELDS = {
+    "P1": {
+        "sensors": ["FIT 101", "LIT 101"],
+        "actuators": ["MV 101", "P101 Status", "P102 Status"],
+    },
     "P2": {
         "sensors": ["AIT 201", "AIT 202", "FIT 201"],
         "actuators": ["P203 Status", "MV201"],
@@ -38,6 +36,27 @@ STAGE_DISPLAY_FIELDS = {
         "sensors": ["FIT 601", "LSH 601", "LSH 602", "LSH 603", "LSL 601", "LSL 602", "LSL 603"],
         "actuators": ["P601 Status", "P602 Status", "P603 Status"],
     },
+}
+ALL_FEATURES = tuple(
+    dict.fromkeys(
+        feature
+        for cols in STAGE_FEATURES.values()
+        for feature in cols
+    )
+)
+DISPLAY_FIELDS = tuple(
+    dict.fromkeys(
+        field
+        for stage_fields in STAGE_DISPLAY_FIELDS.values()
+        for group in ("sensors", "actuators")
+        for field in stage_fields[group]
+    )
+)
+ALL_FEATURES = tuple(dict.fromkeys((*ALL_FEATURES, *DISPLAY_FIELDS)))
+ALERTING_STAGES = tuple(stage for stage in STAGE_FEATURES if stage not in {"P1", "P6"})
+LAST_KNOWN_VALUES: Dict[str, float] = {}
+LAST_ANOMALY_STATES: Dict[str, bool] = {
+    stage: False for stage in STAGE_FEATURES
 }
 
 
@@ -103,6 +122,8 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
         sensor_values = {name: feature_row[name] for name in display_fields["sensors"] if name in feature_row}
         actuator_values = {name: feature_row[name] for name in display_fields["actuators"] if name in feature_row}
         raw_values = {name: feature_row[name] for name in cols if name in feature_row}
+        result["sensor_values"] = sensor_values
+        result["actuator_values"] = actuator_values
 
         # Persist sensor reading
         reading = SensorReading(

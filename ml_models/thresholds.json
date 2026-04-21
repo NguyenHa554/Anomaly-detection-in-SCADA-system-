@@ -73,5 +73,20 @@
     "test_max_z_p95": 388.849666249776,
     "validation_max_z_mean": 5.862776373217142,
     "validation_max_z_p95": 37.235204227652495
+  },
+  "P1": {
+    "T": 3.059,
+    "W": 10,
+    "validation_raw_exceedance_rate": 0.01,
+    "validation_alert_points": 0,
+    "validation_episode_starts": 0,
+    "selection": "clean_validation_safe",
+    "attack_precision": 1.0,
+    "attack_recall": 0.04987102321582115,
+    "attack_f1": 0.095004095004095,
+    "test_max_z_mean": 0.2945845371538172,
+    "test_max_z_p95": 3.0298849222634714,
+    "validation_max_z_mean": 0.6091613420304999,
+    "validation_max_z_p95": 2.182019455527652
   }
 }

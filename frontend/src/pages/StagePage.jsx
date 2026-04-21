@@ -65,6 +65,8 @@ export default function StagePage() {
 
         const rawData = msg.raw_data || {};
         const stageStatus = (msg.stages || []).find((stage) => stage.stage === stageKey);
+        const liveSensorValues = stageStatus?.sensor_values || {};
+        const liveActuatorValues = stageStatus?.actuator_values || {};
 
         tickRef.current += 1;
         const t = tickRef.current;
@@ -72,7 +74,10 @@ export default function StagePage() {
         setCurrentData(() => {
             const next = {};
             [...(config.sensors || []), ...(config.actuators || [])].forEach((field) => {
-                next[field] = parseNumericValue(rawData[field]);
+                const stageValue = field in liveSensorValues
+                    ? liveSensorValues[field]
+                    : liveActuatorValues[field];
+                next[field] = parseNumericValue(stageValue ?? rawData[field]);
             });
             return next;
         });

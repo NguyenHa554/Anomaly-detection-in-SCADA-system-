@@ -110,22 +110,6 @@ export default function Dashboard() {
     const hasAnomaly = anomalousStages.length > 0;
     const hasWarming = warmingStages.length > 0;
 
-    const highestRiskStage = MONITORED_STAGES.reduce((highest, stage) => {
-        if (scores[stage] == null) return highest;
-        if (!highest) return stage;
-        return scores[stage] > scores[highest] ? stage : highest;
-    }, null);
-
-    const highestRiskAnomalousStage = anomalousStages.reduce((highest, stage) => {
-        if (scores[stage] == null) return highest;
-        if (!highest) return stage;
-        return scores[stage] > scores[highest] ? stage : highest;
-    }, null);
-
-    const chartStage = highestRiskAnomalousStage || highestRiskStage || MONITORED_STAGES[0];
-    const chartStageConfig = STAGE_CONFIG[chartStage];
-    const liveThreshold = status?.thresholds?.[chartStage]?.T ?? chartStageConfig.threshold;
-    const chartScore = scores[chartStage];
     const monitoringOnlyLabel = MONITORING_ONLY_STAGES.join(', ');
 
     const systemStatusValue = hasAnomaly ? 'DANGER' : hasWarming ? 'WARMING UP' : 'NORMAL';
@@ -224,27 +208,37 @@ export default function Dashboard() {
                 </div>
 
                 <div className="dashboard-main">
-                    <div className="card">
-                        <div className="card-header">
-                            <div>
-                                <h3 className="card-title">Z-score trend - Stage {chartStage}</h3>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                                    {chartStageConfig.name}
+                    <div className="dashboard-zscore-grid">
+                        {MONITORED_STAGES.map((stage) => {
+                            const chartStageConfig = STAGE_CONFIG[stage];
+                            const liveThreshold = status?.thresholds?.[stage]?.T ?? chartStageConfig.threshold;
+                            const chartScore = scores[stage];
+
+                            return (
+                                <div className="card dashboard-zscore-card" key={stage}>
+                                    <div className="card-header">
+                                        <div>
+                                            <h3 className="card-title">Z-score trend - Stage {stage}</h3>
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                                                {chartStageConfig.name}
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', fontWeight: 600 }}>
+                                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-primary)' }}></span>
+                                            Z-Score: {chartScore != null ? Number(chartScore).toFixed(2) : '--'}
+                                        </div>
+                                    </div>
+                                    <SensorChart
+                                        data={chartData[stage] || []}
+                                        threshold={liveThreshold}
+                                        height={220}
+                                    />
                                 </div>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', fontWeight: 600 }}>
-                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-primary)' }}></span>
-                                Z-Score: {chartScore != null ? Number(chartScore).toFixed(2) : '--'}
-                            </div>
-                        </div>
-                        <SensorChart
-                            data={chartData[chartStage] || []}
-                            threshold={liveThreshold}
-                            height={250}
-                        />
+                            );
+                        })}
                     </div>
 
-                    <div className="card incident-panel">
+                    <div className="card incident-panel dashboard-alert-panel">
                         <div className="card-header">
                             <div>
                                 <h3 className="card-title">

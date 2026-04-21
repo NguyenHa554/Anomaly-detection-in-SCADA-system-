@@ -604,12 +604,29 @@ body {
 /* ─── Dashboard grid ──────────────────────────────────────────────────── */
 .dashboard-main {
   display: grid;
-  grid-template-columns: 2fr 1fr;
   gap: 24px;
   align-items: start;
 }
 
+.dashboard-zscore-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.dashboard-zscore-card {
+  overflow: hidden;
+}
+
+.dashboard-alert-panel {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 1200px) {
+  .dashboard-zscore-grid {
+    grid-template-columns: 1fr;
+  }
+
   .dashboard-main {
     grid-template-columns: 1fr;
   }
