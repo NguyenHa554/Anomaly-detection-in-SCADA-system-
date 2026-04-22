@@ -33,8 +33,17 @@ export const acknowledgeAlert = (id) =>
     request(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
 
 /** GET /api/history?stage=P1&limit=200 */
-export const getHistory = (stage, limit = 200) =>
-    request(`/api/history?stage=${stage}&limit=${limit}`);
+export const getHistory = (stageOrOptions, limit = 200) => {
+    const options = typeof stageOrOptions === 'object' && stageOrOptions !== null
+        ? stageOrOptions
+        : { stage: stageOrOptions, limit };
+    const qs = new URLSearchParams(
+        Object.fromEntries(
+            Object.entries(options).filter(([, value]) => value !== undefined && value !== null && value !== '')
+        )
+    ).toString();
+    return request(`/api/history${qs ? `?${qs}` : ''}`);
+};
 
 /** POST /api/ingest — single row prediction */
 export const ingestRow = (data) =>
