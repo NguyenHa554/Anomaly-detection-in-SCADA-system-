@@ -6,6 +6,8 @@ import json
 import os
 import pickle
 import re
+import tempfile
+import zipfile
 from collections import deque
 from typing import Deque, Dict, Optional
 
@@ -50,12 +52,56 @@ def get_stage_features(columns) -> Dict[str, list]:
     return stages
 
 
-STAGE_FEATURES: Dict[str, list] = get_stage_features(SELECTED_FEATURES)
+ALL_STAGE_FEATURES: Dict[str, list] = get_stage_features(SELECTED_FEATURES)
+# P1 is no longer AI-monitored, so the runtime should not require its legacy model.
+STAGE_FEATURES: Dict[str, list] = {
+    stage: columns
+    for stage, columns in ALL_STAGE_FEATURES.items()
+    if stage != "P1"
+}
 
 
 def add_derivative_features(data: np.ndarray) -> np.ndarray:
     diff = np.diff(data, axis=0, prepend=data[0].reshape(1, -1))
     return np.concatenate([data, diff], axis=1)
+
+
+def _strip_unsupported_keras_keys(value):
+    if isinstance(value, dict):
+        return {
+            key: _strip_unsupported_keras_keys(inner)
+            for key, inner in value.items()
+            if not (key == "quantization_config" and inner is None)
+        }
+    if isinstance(value, list):
+        return [_strip_unsupported_keras_keys(item) for item in value]
+    return value
+
+
+def _load_model_compat(tf, model_path: str):
+    try:
+        return tf.keras.models.load_model(model_path, compile=False)
+    except TypeError as exc:
+        if "quantization_config" not in str(exc) or not model_path.endswith(".keras"):
+            raise
+
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".keras", delete=False) as tmp:
+                temp_path = tmp.name
+
+            with zipfile.ZipFile(model_path, "r") as source, zipfile.ZipFile(temp_path, "w") as target:
+                for info in source.infolist():
+                    payload = source.read(info.filename)
+                    if info.filename == "config.json":
+                        config = json.loads(payload.decode("utf-8"))
+                        payload = json.dumps(_strip_unsupported_keras_keys(config)).encode("utf-8")
+                    target.writestr(info, payload)
+
+            return tf.keras.models.load_model(temp_path, compile=False)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
 
 
 class AnomalyDetector:
@@ -104,7 +150,7 @@ class AnomalyDetector:
             if not os.path.exists(scaler_path):
                 raise FileNotFoundError(f"Scaler file not found for {stage}: {scaler_path}")
 
-            self.models[stage] = tf.keras.models.load_model(model_path, compile=False)
+            self.models[stage] = _load_model_compat(tf, model_path)
             with open(scaler_path, "rb") as f:
                 self.scalers[stage] = pickle.load(f)
 

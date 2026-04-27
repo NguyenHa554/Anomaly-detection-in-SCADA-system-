@@ -1,49 +1,71 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { getHistory, getStatus } from '../services/api';
 import StatusCard from '../components/StatusCard';
 import SensorChart from '../components/SensorChart';
 import { STAGE_CONFIG } from '../constants/stages';
 
 const MAX_CHART_POINTS = 120;
+const HISTORY_GAP_RESET_MS = 15000;
 
 function parseNumericValue(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
 }
 
-function DeviceListCard({ title, icon, items, emptyMessage }) {
-    return (
-        <div className="card" style={{ padding: 24 }}>
-            <div className="card-header" style={{ marginBottom: 16 }}>
-                <h3 className="card-title">
-                    <span className="material-symbols-outlined" style={{ color: 'var(--accent-primary)' }}>{icon}</span>
-                    {title}
-                </h3>
-            </div>
+function parseTimestamp(value) {
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? timestamp : null;
+}
 
-            {items.length > 0 ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-                    {items.map((item) => (
-                        <div
-                            key={item}
-                            style={{
-                                padding: '12px 14px',
-                                borderRadius: 10,
-                                border: '1px solid var(--border-subtle)',
-                                background: 'var(--bg-surface)',
-                                fontWeight: 600,
-                            }}
-                        >
-                            {item}
-                        </div>
-                    ))}
-                </div>
-            ) : (
-                <div style={{ color: 'var(--text-muted)' }}>{emptyMessage}</div>
-            )}
-        </div>
-    );
+function buildCurrentData(config, sensorValues = {}, actuatorValues = {}, rawValues = {}) {
+    const next = {};
+
+    [...(config.sensors || []), ...(config.actuators || [])].forEach((field) => {
+        const value = field in sensorValues
+            ? sensorValues[field]
+            : field in actuatorValues
+                ? actuatorValues[field]
+                : rawValues[field];
+        next[field] = parseNumericValue(value);
+    });
+
+    return next;
+}
+
+function buildSeriesPoint(timestamp, value, isAnomaly) {
+    const ts = parseTimestamp(timestamp);
+    if (ts == null || value == null) {
+        return null;
+    }
+
+    return { ts, value, isAnomaly: Boolean(isAnomaly) };
+}
+
+function appendLivePoint(series, point) {
+    const previousPoint = series.at(-1);
+    const nextSeries = previousPoint && point.ts - previousPoint.ts > HISTORY_GAP_RESET_MS
+        ? [point]
+        : [...series, point];
+    return nextSeries.slice(-MAX_CHART_POINTS);
+}
+
+function trimToRecentWindow(series) {
+    if (series.length <= 1) {
+        return series;
+    }
+
+    let startIndex = series.length - 1;
+    while (startIndex > 0) {
+        const gap = series[startIndex].ts - series[startIndex - 1].ts;
+        if (gap > HISTORY_GAP_RESET_MS) {
+            break;
+        }
+        startIndex -= 1;
+    }
+
+    return series.slice(startIndex).slice(-MAX_CHART_POINTS);
 }
 
 export default function StagePage() {
@@ -55,79 +77,136 @@ export default function StagePage() {
     const [currentData, setCurrentData] = useState({});
     const [status, setStatus] = useState({
         mode: 'warming',
-        message: 'ĐANG KHỞI ĐỘNG',
-        detail: 'Hệ thống đang tích lũy dữ liệu',
+        message: 'WARMING UP',
+        detail: 'The model is collecting enough samples to evaluate the window.',
     });
-    const tickRef = useRef(0);
+
+    const updateStatusFromStage = useCallback((stageStatus) => {
+        if (!config?.monitored) {
+            setStatus({
+                mode: 'normal',
+                message: 'NOT AI MONITORED',
+                detail: 'This stage remains visible for sensors and actuators only.',
+            });
+            return;
+        }
+
+        if (!stageStatus || stageStatus.status === 'warming_up' || stageStatus.ready === false) {
+            const bufferFill = stageStatus?.buffer_fill ?? 0;
+            const bufferNeeded = stageStatus?.buffer_needed ?? 0;
+            setStatus({
+                mode: 'warming',
+                message: 'WARMING UP',
+                detail: `Buffered samples: ${bufferFill}/${bufferNeeded}`,
+            });
+            return;
+        }
+
+        const isDanger = Boolean(stageStatus.is_anomaly);
+        setStatus({
+            mode: isDanger ? 'danger' : 'normal',
+            message: isDanger ? 'DANGER' : 'NORMAL',
+            detail: isDanger
+                ? 'Confirmed anomaly window detected for this stage.'
+                : 'The stage is within the learned normal window.',
+        });
+    }, [config]);
+
+    useEffect(() => {
+        if (!config) {
+            return;
+        }
+
+        getHistory({ stage: stageKey, limit: MAX_CHART_POINTS }).then((rows) => {
+            const nextChartData = {};
+
+            rows.forEach((row) => {
+                (config.sensors || []).forEach((sensor) => {
+                    const value = parseNumericValue(
+                        row.sensor_values?.[sensor] ?? row.raw_values?.[sensor]
+                    );
+                    const point = buildSeriesPoint(row.timestamp, value, row.is_anomaly);
+                    if (!point) {
+                        return;
+                    }
+
+                    const series = [...(nextChartData[sensor] || []), point];
+                    nextChartData[sensor] = series.slice(-MAX_CHART_POINTS);
+                });
+            });
+
+            Object.keys(nextChartData).forEach((sensor) => {
+                nextChartData[sensor] = trimToRecentWindow(nextChartData[sensor]);
+            });
+
+            setChartData(nextChartData);
+
+            const latestRow = rows.at(-1);
+            if (latestRow) {
+                setCurrentData(
+                    buildCurrentData(
+                        config,
+                        latestRow.sensor_values || {},
+                        latestRow.actuator_values || {},
+                        latestRow.raw_values || {}
+                    )
+                );
+
+                if (config.monitored) {
+                    setStatus({
+                        mode: latestRow.is_anomaly ? 'danger' : 'normal',
+                        message: latestRow.is_anomaly ? 'DANGER' : 'NORMAL',
+                        detail: latestRow.is_anomaly
+                            ? 'Confirmed anomaly window detected for this stage.'
+                            : 'The stage is within the learned normal window.',
+                    });
+                }
+            }
+        }).catch(() => {});
+
+        getStatus().then((runtimeStatus) => {
+            const stageStatus = runtimeStatus?.stages?.[stageKey];
+            updateStatusFromStage(stageStatus);
+        }).catch(() => {});
+    }, [config, stageKey, updateStatusFromStage]);
 
     const handleMessage = useCallback((msg) => {
-        if (msg.type !== 'sensor_update') return;
+        if (msg.type !== 'sensor_update' || !config) return;
 
         const rawData = msg.raw_data || {};
         const stageStatus = (msg.stages || []).find((stage) => stage.stage === stageKey);
         const liveSensorValues = stageStatus?.sensor_values || {};
         const liveActuatorValues = stageStatus?.actuator_values || {};
 
-        tickRef.current += 1;
-        const t = tickRef.current;
+        setCurrentData(
+            buildCurrentData(config, liveSensorValues, liveActuatorValues, rawData)
+        );
 
-        setCurrentData(() => {
-            const next = {};
-            [...(config.sensors || []), ...(config.actuators || [])].forEach((field) => {
-                const stageValue = field in liveSensorValues
-                    ? liveSensorValues[field]
-                    : liveActuatorValues[field];
-                next[field] = parseNumericValue(stageValue ?? rawData[field]);
-            });
-            return next;
-        });
-
+        const messageTimestamp = stageStatus?.timestamp || msg.timestamp;
         setChartData((prev) => {
             const next = { ...prev };
+
             (config.sensors || []).forEach((sensor) => {
-                const value = parseNumericValue(rawData[sensor]);
-                if (value === null) return;
-                const isAnomaly = stageStatus ? Boolean(stageStatus.is_anomaly) : false;
-                const series = [
-                    ...(prev[sensor] || []),
-                    { t, value, isAnomaly },
-                ];
-                next[sensor] = series.slice(-MAX_CHART_POINTS);
+                const value = parseNumericValue(
+                    liveSensorValues[sensor] ?? rawData[sensor]
+                );
+                const point = buildSeriesPoint(messageTimestamp, value, stageStatus?.is_anomaly);
+                if (!point) {
+                    return;
+                }
+
+                next[sensor] = appendLivePoint(prev[sensor] || [], point);
             });
+
             return next;
         });
 
-        if (!config.monitored) {
-            setStatus({
-                mode: 'normal',
-                message: 'CHƯA GIÁM SÁT',
-                detail: 'Hoạt động nhưng không có mô hình AI',
-            });
-            return;
-        }
-
-        if (stageStatus?.status === 'warming_up') {
-            setStatus({
-                mode: 'warming',
-                message: 'ĐANG KHỞI ĐỘNG',
-                detail: `${stageStatus.buffer_fill || 0}/${stageStatus.buffer_needed || 0} mẫu đã lưu`,
-            });
-            return;
-        }
-
-        const isDanger = stageStatus ? Boolean(stageStatus.is_anomaly) : false;
-        setStatus({
-            mode: isDanger ? 'danger' : 'normal',
-            message: isDanger ? 'BẤT THƯỜNG' : 'BÌNH THƯỜNG',
-            detail: isDanger ? 'Phát hiện chuỗi tín hiệu bất thường' : 'Hệ thống đang hoạt động ổn định',
-        });
-    }, [config, stageKey]);
+        updateStatusFromStage(stageStatus);
+    }, [config, stageKey, updateStatusFromStage]);
 
     useWebSocket({ onMessage: handleMessage });
 
     if (!config) return <Navigate to="/" />;
-
-
 
     const statusColor = status.mode === 'danger' ? 'critical' : status.mode === 'warming' ? 'warning' : 'normal';
     const statusIconColor = status.mode === 'danger' ? 'red' : status.mode === 'warming' ? 'orange' : 'green';
@@ -136,7 +215,7 @@ export default function StagePage() {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <header className="page-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span className="page-title" style={{ color: 'var(--text-muted)' }}>Tổng quan</span>
+                    <span className="page-title" style={{ color: 'var(--text-muted)' }}>Overview</span>
                     <span className="material-symbols-outlined" style={{ fontSize: 18, color: 'var(--text-muted)' }}>chevron_right</span>
                     <h1 className="page-title">{stageKey} - {config.name}</h1>
                 </div>
@@ -145,17 +224,17 @@ export default function StagePage() {
             <div className="page-container">
                 <div style={{ marginBottom: 24 }}>
                     <StatusCard
-                        label="TRẠNG THÁI GIAI ĐOẠN"
+                        label="STAGE STATUS"
                         value={status.message}
                         valColor={statusColor}
-                        sub={`${status.detail} | Cảm biến: ${config.sensors.length} | Thiết bị: ${config.actuators.length}`}
+                        sub={`${status.detail} | Sensors: ${config.sensors.length} | Actuators: ${config.actuators.length}`}
                         icon="network_check"
                         iconColor={statusIconColor}
                     />
                 </div>
 
                 <div className="card" style={{ marginBottom: 24, padding: 24 }}>
-                    <h3 className="card-title" style={{ marginBottom: 16 }}>Biểu đồ cảm biến liên tục</h3>
+                    <h3 className="card-title" style={{ marginBottom: 16 }}>Continuous sensors</h3>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
                         {config.sensors.map((sensor) => (
                             <div key={sensor} style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 16 }}>
@@ -179,7 +258,7 @@ export default function StagePage() {
                 </div>
 
                 <div className="card" style={{ padding: 24 }}>
-                    <h3 className="card-title" style={{ marginBottom: 16 }}>Thiết bị chấp hành</h3>
+                    <h3 className="card-title" style={{ marginBottom: 16 }}>Actuators</h3>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                         {config.actuators.map((actuator) => {
                             const value = currentData[actuator];
@@ -210,7 +289,7 @@ export default function StagePage() {
                                     <div>
                                         <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{actuator}</div>
                                         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                            Thông số hiện tại: {value !== null && value !== undefined ? value.toFixed(2) : '--'}
+                                            Current value: {value !== null && value !== undefined ? value.toFixed(2) : '--'}
                                         </div>
                                     </div>
                                     <div
@@ -220,7 +299,7 @@ export default function StagePage() {
                                             color: isActive ? 'var(--color-normal)' : 'var(--text-muted)',
                                         }}
                                     >
-                                        {isActive ? 'HOẠT ĐỘNG' : 'TẮT'}
+                                        {isActive ? 'ACTIVE' : 'OFF'}
                                     </div>
                                 </div>
                             );

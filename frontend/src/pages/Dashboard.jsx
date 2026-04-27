@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { getStatus, getAlerts } from '../services/api';
+import { getStatus, getAlerts, getHistory } from '../services/api';
 import StatusCard from '../components/StatusCard';
 import StageIndicator from '../components/StageIndicator';
 import SensorChart from '../components/SensorChart';
@@ -8,9 +8,40 @@ import AlertPanel from '../components/AlertPanel';
 import { STAGE_CONFIG, STAGES, MONITORED_STAGES, MONITORING_ONLY_STAGES } from '../constants/stages';
 
 const MAX_CHART_POINTS = 120;
+const HISTORY_GAP_RESET_MS = 15000;
 const INITIAL_WARMING_STATES = Object.fromEntries(
     STAGES.map((stage) => [stage, Boolean(STAGE_CONFIG[stage]?.monitored)])
 );
+
+function parseTimestamp(value) {
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function appendLivePoint(series, point) {
+    const previousPoint = series.at(-1);
+    const nextSeries = previousPoint && point.ts - previousPoint.ts > HISTORY_GAP_RESET_MS
+        ? [point]
+        : [...series, point];
+    return nextSeries.slice(-MAX_CHART_POINTS);
+}
+
+function trimToRecentWindow(series) {
+    if (series.length <= 1) {
+        return series;
+    }
+
+    let startIndex = series.length - 1;
+    while (startIndex > 0) {
+        const gap = series[startIndex].ts - series[startIndex - 1].ts;
+        if (gap > HISTORY_GAP_RESET_MS) {
+            break;
+        }
+        startIndex -= 1;
+    }
+
+    return series.slice(startIndex).slice(-MAX_CHART_POINTS);
+}
 
 export default function Dashboard() {
     const [status, setStatus] = useState(null);
@@ -25,13 +56,10 @@ export default function Dashboard() {
     );
     const [warmingStates, setWarmingStates] = useState(INITIAL_WARMING_STATES);
     const [alerts, setAlerts] = useState([]);
-    const tickRef = useRef(0);
 
     const handleMessage = useCallback((msg) => {
         if (msg.type === 'sensor_update') {
             const { stages = [] } = msg;
-            tickRef.current += 1;
-            const t = tickRef.current;
 
             const nextScores = {};
             const nextAnomalyStates = {};
@@ -51,12 +79,13 @@ export default function Dashboard() {
                 const next = { ...prev };
                 stages.forEach((stage) => {
                     const score = Number.isFinite(stage.max_z_score) ? stage.max_z_score : null;
-                    if (score == null) return;
-                    const series = [
-                        ...(next[stage.stage] || []),
-                        { t, score, isAnomaly: Boolean(stage.is_anomaly) },
-                    ];
-                    next[stage.stage] = series.slice(-MAX_CHART_POINTS);
+                    const ts = parseTimestamp(stage.timestamp || msg.timestamp);
+                    if (score == null || ts == null) return;
+                    next[stage.stage] = appendLivePoint(next[stage.stage] || [], {
+                        ts,
+                        score,
+                        isAnomaly: Boolean(stage.is_anomaly),
+                    });
                 });
                 return next;
             });
@@ -76,6 +105,41 @@ export default function Dashboard() {
     useEffect(() => {
         getStatus().then(setStatus).catch(() => {});
         getAlerts({ limit: 30 }).then((data) => setAlerts(data.alerts || data)).catch(() => {});
+        Promise.all(
+            MONITORED_STAGES.map(async (stage) => {
+                const rows = await getHistory({ stage, limit: MAX_CHART_POINTS });
+                return [stage, rows];
+            })
+        ).then((stageHistories) => {
+            const nextChartData = Object.fromEntries(STAGES.map((stage) => [stage, []]));
+            const nextScores = Object.fromEntries(STAGES.map((stage) => [stage, null]));
+            const nextAnomalyStates = Object.fromEntries(STAGES.map((stage) => [stage, false]));
+
+            stageHistories.forEach(([stage, rows]) => {
+                const series = [];
+
+                rows.forEach((row) => {
+                    const ts = parseTimestamp(row.timestamp);
+                    if (!row.stage || ts == null || !Number.isFinite(row.z_score)) {
+                        return;
+                    }
+
+                    series.push({
+                        ts,
+                        score: row.z_score,
+                        isAnomaly: Boolean(row.is_anomaly),
+                    });
+                    nextScores[stage] = row.z_score;
+                    nextAnomalyStates[stage] = Boolean(row.is_anomaly);
+                });
+
+                nextChartData[stage] = trimToRecentWindow(series);
+            });
+
+            setChartData(nextChartData);
+            setScores(nextScores);
+            setAnomalyStates(nextAnomalyStates);
+        }).catch(() => {});
     }, []);
 
     useEffect(() => {
@@ -111,11 +175,14 @@ export default function Dashboard() {
     const hasWarming = warmingStages.length > 0;
 
     const monitoringOnlyLabel = MONITORING_ONLY_STAGES.join(', ');
+    const updatedTime = status?.server_time
+        ? new Date(status.server_time).toLocaleTimeString('vi-VN')
+        : '--';
 
     const systemStatusValue = hasAnomaly ? 'DANGER' : hasWarming ? 'WARMING UP' : 'NORMAL';
     const systemStatusColor = hasAnomaly ? 'critical' : hasWarming ? 'warning' : 'normal';
     const systemStatusSub = hasAnomaly
-        ? `Confirmed anomaly at stage ${anomalousStages[0] || chartStage}`
+        ? `Confirmed anomaly at stage ${anomalousStages[0] || MONITORED_STAGES[0]}`
         : hasWarming
             ? `Model warming up at stage ${warmingStages[0]}`
             : 'All production alert stages are ready';
@@ -173,7 +240,7 @@ export default function Dashboard() {
                             Operating pipeline
                         </h2>
                         <span className="stage-updated-time">
-                            Updated: {new Date().toLocaleTimeString('vi-VN')}
+                            Updated: {updatedTime}
                         </span>
                     </div>
                     <div style={{
