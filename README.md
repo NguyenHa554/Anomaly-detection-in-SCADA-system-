@@ -152,7 +152,6 @@ The system monitors 5 production stages:
 
 | Stage | Features | Description |
 |-------|----------|-------------|
-| P1 | AIT 101, FIT 101, MV101 | Raw Water |
 | P2 | AIT 201-203, FIT 201, MV201 | Chemical dosing |
 | P3 | AIT 301-303, DPIT 301, FIT 301, LIT 301 | Dechlorination |
 | P4 | AIT 401-402, FIT 401, LIT 401, UV401 | UV disinfection |
@@ -190,9 +189,6 @@ npm run lint
 
 ```bash
 docker-compose up --build
-<<<<<<< HEAD
-```
-=======
 
 ```
 ### Running simulator 
@@ -200,7 +196,6 @@ $env:SIM_START_ROW=''
 $env:SIM_END_ROW=''
 $env:SIM_DELAY=''
 python -m backend.simulator
->>>>>>> 717f6ba (update threshold UI)
 
 ## SWaT Dataset
 
@@ -213,8 +208,4 @@ This project is for educational/research purposes.
 ## References
 
 - SWaT Dataset: https://itrust.sutd.edu.sg/itrust-labs-home datasets/swat/
-<<<<<<< HEAD
 - Related research papers on CNN-based anomaly detection for SCADA systems
-=======
-- Related research papers on CNN-based anomaly detection for SCADA systems
->>>>>>> 717f6ba (update threshold UI)

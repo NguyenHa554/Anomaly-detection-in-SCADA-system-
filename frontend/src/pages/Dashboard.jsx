@@ -1,128 +1,58 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useWebSocket } from '../hooks/useWebSocket';
-import { getStatus, getAlerts, getHistory } from '../services/api';
+import { useEffect, useCallback, useMemo } from 'react';
+import { getHistory } from '../services/api';
+import {
+    BACKFILL_HISTORY_LIMIT,
+    CHART_WINDOW_MS,
+    mergeSeries,
+    normalizeSeries,
+} from '../services/chartSeriesStore';
+import { useScadaStream } from '../context/scadaStreamContextValue';
 import StatusCard from '../components/StatusCard';
 import StageIndicator from '../components/StageIndicator';
 import SensorChart from '../components/SensorChart';
 import AlertPanel from '../components/AlertPanel';
 import { STAGE_CONFIG, STAGES, MONITORED_STAGES, MONITORING_ONLY_STAGES } from '../constants/stages';
 
-const MAX_CHART_POINTS = 120;
-const HISTORY_GAP_RESET_MS = 15000;
-const INITIAL_WARMING_STATES = Object.fromEntries(
-    STAGES.map((stage) => [stage, Boolean(STAGE_CONFIG[stage]?.monitored)])
-);
+const EMPTY_CHART_DATA = Object.fromEntries(STAGES.map((stage) => [stage, []]));
+const EMPTY_SCORES = Object.fromEntries(STAGES.map((stage) => [stage, null]));
+const EMPTY_ANOMALY_STATES = Object.fromEntries(STAGES.map((stage) => [stage, false]));
 
 function parseTimestamp(value) {
     const timestamp = Date.parse(value);
     return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function appendLivePoint(series, point) {
-    const previousPoint = series.at(-1);
-    const nextSeries = previousPoint && point.ts - previousPoint.ts > HISTORY_GAP_RESET_MS
-        ? [point]
-        : [...series, point];
-    return nextSeries.slice(-MAX_CHART_POINTS);
-}
-
-function trimToRecentWindow(series) {
-    if (series.length <= 1) {
-        return series;
-    }
-
-    let startIndex = series.length - 1;
-    while (startIndex > 0) {
-        const gap = series[startIndex].ts - series[startIndex - 1].ts;
-        if (gap > HISTORY_GAP_RESET_MS) {
-            break;
-        }
-        startIndex -= 1;
-    }
-
-    return series.slice(startIndex).slice(-MAX_CHART_POINTS);
-}
-
 export default function Dashboard() {
-    const [status, setStatus] = useState(null);
-    const [chartData, setChartData] = useState(
-        Object.fromEntries(STAGES.map((stage) => [stage, []]))
-    );
-    const [scores, setScores] = useState(
-        Object.fromEntries(STAGES.map((stage) => [stage, null]))
-    );
-    const [anomalyStates, setAnomalyStates] = useState(
-        Object.fromEntries(STAGES.map((stage) => [stage, false]))
-    );
-    const [warmingStates, setWarmingStates] = useState(INITIAL_WARMING_STATES);
-    const [alerts, setAlerts] = useState([]);
-
-    const handleMessage = useCallback((msg) => {
-        if (msg.type === 'sensor_update') {
-            const { stages = [] } = msg;
-
-            const nextScores = {};
-            const nextAnomalyStates = {};
-            const nextWarmingStates = {};
-
-            stages.forEach((stage) => {
-                nextScores[stage.stage] = Number.isFinite(stage.max_z_score) ? stage.max_z_score : null;
-                nextAnomalyStates[stage.stage] = Boolean(stage.is_anomaly);
-                nextWarmingStates[stage.stage] = stage.status === 'warming_up';
-            });
-
-            setScores((prev) => ({ ...prev, ...nextScores }));
-            setAnomalyStates((prev) => ({ ...prev, ...nextAnomalyStates }));
-            setWarmingStates((prev) => ({ ...prev, ...nextWarmingStates }));
-
-            setChartData((prev) => {
-                const next = { ...prev };
-                stages.forEach((stage) => {
-                    const score = Number.isFinite(stage.max_z_score) ? stage.max_z_score : null;
-                    const ts = parseTimestamp(stage.timestamp || msg.timestamp);
-                    if (score == null || ts == null) return;
-                    next[stage.stage] = appendLivePoint(next[stage.stage] || [], {
-                        ts,
-                        score,
-                        isAnomaly: Boolean(stage.is_anomaly),
-                    });
-                });
-                return next;
-            });
-        }
-
-        if (msg.type === 'alert' && msg.alert) {
-            setAlerts((prev) => [msg.alert, ...prev].slice(0, 100));
-        }
-
-        if (msg.type === 'status') {
-            setStatus(msg);
-        }
-    }, []);
-
-    const { connected } = useWebSocket({ onMessage: handleMessage });
+    const {
+        alerts,
+        anomalyStates,
+        dashboardChartData: chartData,
+        scores,
+        setAlerts,
+        setAnomalyStates,
+        setDashboardChartData: setChartData,
+        setScores,
+        status,
+        warmingStates,
+    } = useScadaStream();
 
     useEffect(() => {
-        getStatus().then(setStatus).catch(() => {});
-        getAlerts({ limit: 30 }).then((data) => setAlerts(data.alerts || data)).catch(() => {});
         Promise.all(
             MONITORED_STAGES.map(async (stage) => {
-                const rows = await getHistory({ stage, limit: MAX_CHART_POINTS });
+                const rows = await getHistory({ stage, limit: BACKFILL_HISTORY_LIMIT });
                 return [stage, rows];
             })
         ).then((stageHistories) => {
-            const nextChartData = Object.fromEntries(STAGES.map((stage) => [stage, []]));
-            const nextScores = Object.fromEntries(STAGES.map((stage) => [stage, null]));
-            const nextAnomalyStates = Object.fromEntries(STAGES.map((stage) => [stage, false]));
+            const nextChartData = { ...EMPTY_CHART_DATA };
+            const nextScores = { ...EMPTY_SCORES };
+            const nextAnomalyStates = { ...EMPTY_ANOMALY_STATES };
 
             stageHistories.forEach(([stage, rows]) => {
                 const series = [];
 
                 rows.forEach((row) => {
                     const ts = parseTimestamp(row.timestamp);
-                    if (!row.stage || ts == null || !Number.isFinite(row.z_score)) {
-                        return;
-                    }
+                    if (!row.stage || ts == null || !Number.isFinite(row.z_score)) return;
 
                     series.push({
                         ts,
@@ -133,22 +63,22 @@ export default function Dashboard() {
                     nextAnomalyStates[stage] = Boolean(row.is_anomaly);
                 });
 
-                nextChartData[stage] = trimToRecentWindow(series);
+                nextChartData[stage] = normalizeSeries(series);
             });
 
-            setChartData(nextChartData);
-            setScores(nextScores);
-            setAnomalyStates(nextAnomalyStates);
+            setChartData((prev) => {
+                const merged = { ...prev };
+                MONITORED_STAGES.forEach((stage) => {
+                    merged[stage] = normalizeSeries(
+                        mergeSeries(prev[stage] || [], nextChartData[stage] || [])
+                    );
+                });
+                return merged;
+            });
+            setScores((prev) => ({ ...prev, ...nextScores }));
+            setAnomalyStates((prev) => ({ ...prev, ...nextAnomalyStates }));
         }).catch(() => {});
-    }, []);
-
-    useEffect(() => {
-        if (!connected) return;
-        const id = setInterval(() => {
-            getStatus().then(setStatus).catch(() => {});
-        }, 5000);
-        return () => clearInterval(id);
-    }, [connected]);
+    }, [setAnomalyStates, setChartData, setScores]);
 
     const effectiveWarmingStates = useMemo(() => {
         const next = { ...warmingStates };
@@ -164,7 +94,7 @@ export default function Dashboard() {
         setAlerts((prev) => prev.map((alert) => (
             alert.id === id ? { ...alert, acknowledged: true } : alert
         )));
-    }, []);
+    }, [setAlerts]);
 
     const activeAlerts = alerts.filter((alert) => !alert.acknowledged).length;
     const anomalousStages = MONITORED_STAGES.filter((stage) => Boolean(anomalyStates[stage]));
@@ -285,9 +215,9 @@ export default function Dashboard() {
                                 <div className="card dashboard-zscore-card" key={stage}>
                                     <div className="card-header">
                                         <div>
-                                            <h3 className="card-title">Z-score trend - Stage {stage}</h3>
+                                            <h3 className="card-title">Line chart - Stage {stage}</h3>
                                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                                                {chartStageConfig.name}
+                                                Realtime - last 1 minute | {chartStageConfig.name}
                                             </div>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', fontWeight: 600 }}>
@@ -298,7 +228,13 @@ export default function Dashboard() {
                                     <SensorChart
                                         data={chartData[stage] || []}
                                         threshold={liveThreshold}
-                                        height={220}
+                                        height={260}
+                                        windowMs={CHART_WINDOW_MS}
+                                        tickStepMs={5000}
+                                        showMiniOverview
+                                        legendLabel={`Z-score ${stage}`}
+                                        latestValue={chartScore}
+                                        resetKey={`dashboard-${stage}`}
                                     />
                                 </div>
                             );
@@ -324,3 +260,4 @@ export default function Dashboard() {
         </div>
     );
 }
+

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="920" viewBox="0 0 1800 920">
+  <defs>
+    <marker id="arrow" markerWidth="18" markerHeight="18" refX="15" refY="9" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 18 9 L 0 18 z" fill="#1b0b3f"/>
+    </marker>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="5" flood-color="#1b0b3f" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="1800" height="920" fill="#ffffff"/>
+
+  <g fill="none" stroke="#1b0b3f" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)">
+    <path d="M 500 230 L 645 230"/>
+    <path d="M 1115 230 L 1260 230"/>
+    <path d="M 1457 340 L 1457 455 Q 1457 510 1402 510 L 1110 510"/>
+    <path d="M 620 510 L 585 510"/>
+  </g>
+
+  <g font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#1b0b3f">
+    <g filter="url(#softShadow)">
+      <rect x="145" y="120" width="355" height="220" rx="24" fill="#eee9ff" stroke="#1b0b3f" stroke-width="10"/>
+      <text x="322.5" y="230">Dữ liệu</text>
+    </g>
+
+    <g filter="url(#softShadow)">
+      <rect x="645" y="120" width="470" height="220" rx="24" fill="#eee9ff" stroke="#1b0b3f" stroke-width="10"/>
+      <text x="880" y="230">Tiền xử lý</text>
+    </g>
+
+    <g filter="url(#softShadow)">
+      <rect x="1260" y="120" width="395" height="220" rx="24" fill="#eee9ff" stroke="#1b0b3f" stroke-width="10"/>
+      <text x="1457.5" y="230">Phân đoạn</text>
+    </g>
+
+    <g filter="url(#softShadow)">
+      <rect x="1140" y="400" width="460" height="220" rx="24" fill="#eee9ff" stroke="#1b0b3f" stroke-width="10"/>
+      <text x="1370" y="510">Mô hình</text>
+    </g>
+
+    <g filter="url(#softShadow)">
+      <rect x="620" y="400" width="490" height="220" rx="24" fill="#eee9ff" stroke="#1b0b3f" stroke-width="10"/>
+      <text x="865" y="510">Phát hiện</text>
+    </g>
+
+    <g filter="url(#softShadow)">
+      <rect x="145" y="400" width="440" height="220" rx="24" fill="#eee9ff" stroke="#1b0b3f" stroke-width="10"/>
+      <text x="365" y="510">Cảnh báo</text>
+    </g>
+  </g>
+</svg>

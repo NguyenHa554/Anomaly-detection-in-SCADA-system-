@@ -48,7 +48,7 @@ export const STAGE_CONFIG = {
         threshold: 2.0,
         window: 30,
         name: 'Làm sạch hệ thống',
-        monitored: false,
+        monitored: true,
         alertMode: 'monitoring',
         sensors: ['FIT 601', 'LSH 601', 'LSH 602', 'LSH 603', 'LSL 601', 'LSL 602', 'LSL 603'],
         actuators: ['P601 Status', 'P602 Status', 'P603 Status'],

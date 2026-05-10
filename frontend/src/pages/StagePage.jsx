@@ -1,13 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
-import { useWebSocket } from '../hooks/useWebSocket';
 import { getHistory, getStatus } from '../services/api';
+import {
+    BACKFILL_HISTORY_LIMIT,
+    CHART_WINDOW_MS,
+    mergeSeries,
+    normalizeSeries,
+    writeChartSeriesStore,
+} from '../services/chartSeriesStore';
+import { useScadaStream } from '../context/scadaStreamContextValue';
 import StatusCard from '../components/StatusCard';
 import SensorChart from '../components/SensorChart';
 import { STAGE_CONFIG } from '../constants/stages';
 
-const MAX_CHART_POINTS = 120;
-const HISTORY_GAP_RESET_MS = 15000;
+const DAY_HISTORY_LIMIT = 86400;
+const DEVICE_HISTORY_WINDOW_MS = 60 * 60 * 1000;
+const STREAM_GAP_THRESHOLD_MS = 15 * 1000;
+const DAY_HISTORY_GAP_THRESHOLD_MS = 5 * 60 * 1000;
 
 function parseNumericValue(value) {
     const parsed = Number(value);
@@ -43,81 +52,199 @@ function buildSeriesPoint(timestamp, value, isAnomaly) {
     return { ts, value, isAnomaly: Boolean(isAnomaly) };
 }
 
-function appendLivePoint(series, point) {
-    const previousPoint = series.at(-1);
-    const nextSeries = previousPoint && point.ts - previousPoint.ts > HISTORY_GAP_RESET_MS
-        ? [point]
-        : [...series, point];
-    return nextSeries.slice(-MAX_CHART_POINTS);
+function getStageCacheKey(stageKey) {
+    return `stage-session-${stageKey || 'unknown'}-v1`;
 }
 
-function trimToRecentWindow(series) {
-    if (series.length <= 1) {
-        return series;
+function buildDeviceHistory(rows, field, kind) {
+    const latestTimestamp = rows.reduce((latest, row) => {
+        const ts = parseTimestamp(row.timestamp);
+        return ts != null && ts > latest ? ts : latest;
+    }, 0);
+    const dayStart = latestTimestamp ? latestTimestamp - 24 * 60 * 60 * 1000 : 0;
+
+    return rows
+        .map((row) => {
+            const timestamp = parseTimestamp(row.timestamp);
+            const source = kind === 'actuator' ? row.actuator_values : row.sensor_values;
+            const fallbackSource = row.raw_values || {};
+            const value = parseNumericValue(source?.[field] ?? fallbackSource[field]);
+
+            if (timestamp == null || value == null || (dayStart && timestamp < dayStart)) {
+                return null;
+            }
+
+            return {
+                ts: timestamp,
+                value,
+                isAnomaly: Boolean(row.is_anomaly),
+            };
+        })
+        .filter(Boolean);
+}
+
+function formatDetailTimestamp(timestamp) {
+    const date = new Date(timestamp);
+    return Number.isNaN(date.getTime()) ? '--' : date.toLocaleString('vi-VN');
+}
+
+function DeviceHistoryModal({ device, points, loading, onClose }) {
+    if (!device) {
+        return null;
     }
 
-    let startIndex = series.length - 1;
-    while (startIndex > 0) {
-        const gap = series[startIndex].ts - series[startIndex - 1].ts;
-        if (gap > HISTORY_GAP_RESET_MS) {
-            break;
-        }
-        startIndex -= 1;
-    }
+    const latestPoint = points.at(-1);
+    const minValue = points.length ? Math.min(...points.map((point) => point.value)) : null;
+    const maxValue = points.length ? Math.max(...points.map((point) => point.value)) : null;
 
-    return series.slice(startIndex).slice(-MAX_CHART_POINTS);
+    return (
+        <div className="device-modal-backdrop" role="presentation" onClick={onClose}>
+            <section className="device-modal" role="dialog" aria-modal="true" aria-label={`${device.field} 24 hour history`} onClick={(event) => event.stopPropagation()}>
+                <div className="device-modal-header">
+                    <div>
+                        <div className="device-modal-eyebrow">{device.kind === 'actuator' ? 'Actuator' : 'Sensor'} history</div>
+                        <h2 className="device-modal-title">{device.field}</h2>
+                        <div className="device-modal-subtitle">Last 24 hours from stored stage history</div>
+                    </div>
+                    <button className="device-modal-close" type="button" onClick={onClose} aria-label="Close device history">
+                        <span className="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+
+                <div className="device-modal-stats">
+                    <div>
+                        <span>Latest</span>
+                        <strong>{latestPoint ? latestPoint.value.toFixed(2) : '--'}</strong>
+                    </div>
+                    <div>
+                        <span>Min</span>
+                        <strong>{minValue != null ? minValue.toFixed(2) : '--'}</strong>
+                    </div>
+                    <div>
+                        <span>Max</span>
+                        <strong>{maxValue != null ? maxValue.toFixed(2) : '--'}</strong>
+                    </div>
+                    <div>
+                        <span>Samples</span>
+                        <strong>{points.length}</strong>
+                    </div>
+                </div>
+
+                <div className="device-modal-chart">
+                    {loading ? (
+                        <div className="device-modal-empty">Loading device history...</div>
+                    ) : points.length > 0 ? (
+                        <SensorChart
+                            data={points}
+                            threshold={null}
+                            height={300}
+                            dataKey="value"
+                            windowMs={DEVICE_HISTORY_WINDOW_MS}
+                            tickStepMs={60 * 60 * 1000}
+                            showMiniOverview
+                            resetKey={`modal-${device.field}`}
+                            gapThresholdMs={DAY_HISTORY_GAP_THRESHOLD_MS}
+                        />
+                    ) : (
+                        <div className="device-modal-empty">No stored values for this device</div>
+                    )}
+                </div>
+
+                <div className="device-modal-table-wrap">
+                    <table className="device-modal-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Value</th>
+                                <th>Window state</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {points.slice(-300).reverse().map((point) => (
+                                <tr key={`${point.ts}-${point.value}`}>
+                                    <td>{formatDetailTimestamp(point.ts)}</td>
+                                    <td>{point.value.toFixed(4)}</td>
+                                    <td>{point.isAnomaly ? 'DANGER' : 'NORMAL'}</td>
+                                </tr>
+                            ))}
+                            {!loading && points.length === 0 && (
+                                <tr>
+                                    <td colSpan="3">No rows available</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    );
 }
 
 export default function StagePage() {
     const { stageId } = useParams();
     const stageKey = stageId?.toUpperCase();
     const config = STAGE_CONFIG[stageKey];
+    const cacheKey = getStageCacheKey(stageKey);
+    const {
+        applyRuntimeStatus,
+        setStageChartData,
+        setStageCurrentData,
+        setStageStatuses,
+        stageChartData,
+        stageCurrentData,
+        stageStatuses,
+    } = useScadaStream();
+    const chartData = stageChartData[stageKey] || {};
+    const currentData = stageCurrentData[stageKey] || {};
+    const status = stageStatuses[stageKey] || {
+        mode: config?.monitored ? 'warming' : 'normal',
+        message: config?.monitored ? 'WARMING UP' : 'NOT AI MONITORED',
+        detail: config?.monitored
+            ? 'The model is collecting enough samples to evaluate the window.'
+            : 'This stage remains visible for sensors and actuators only.',
+    };
+    const [selectedDevice, setSelectedDevice] = useState(null);
+    const [deviceHistory, setDeviceHistory] = useState([]);
+    const [deviceHistoryLoading, setDeviceHistoryLoading] = useState(false);
 
-    const [chartData, setChartData] = useState({});
-    const [currentData, setCurrentData] = useState({});
-    const [status, setStatus] = useState({
-        mode: 'warming',
-        message: 'WARMING UP',
-        detail: 'The model is collecting enough samples to evaluate the window.',
-    });
+    const openDeviceHistory = useCallback((device) => {
+        setDeviceHistory([]);
+        setDeviceHistoryLoading(true);
+        setSelectedDevice(device);
+    }, []);
 
-    const updateStatusFromStage = useCallback((stageStatus) => {
-        if (!config?.monitored) {
-            setStatus({
-                mode: 'normal',
-                message: 'NOT AI MONITORED',
-                detail: 'This stage remains visible for sensors and actuators only.',
-            });
+    const closeDeviceHistory = useCallback(() => {
+        setSelectedDevice(null);
+        setDeviceHistory([]);
+        setDeviceHistoryLoading(false);
+    }, []);
+
+    useEffect(() => {
+        if (!selectedDevice || !stageKey) {
             return;
         }
 
-        if (!stageStatus || stageStatus.status === 'warming_up' || stageStatus.ready === false) {
-            const bufferFill = stageStatus?.buffer_fill ?? 0;
-            const bufferNeeded = stageStatus?.buffer_needed ?? 0;
-            setStatus({
-                mode: 'warming',
-                message: 'WARMING UP',
-                detail: `Buffered samples: ${bufferFill}/${bufferNeeded}`,
-            });
-            return;
-        }
-
-        const isDanger = Boolean(stageStatus.is_anomaly);
-        setStatus({
-            mode: isDanger ? 'danger' : 'normal',
-            message: isDanger ? 'DANGER' : 'NORMAL',
-            detail: isDanger
-                ? 'Confirmed anomaly window detected for this stage.'
-                : 'The stage is within the learned normal window.',
+        let cancelled = false;
+        getHistory({ stage: stageKey, limit: DAY_HISTORY_LIMIT }).then((rows) => {
+            if (cancelled) return;
+            setDeviceHistory(buildDeviceHistory(rows, selectedDevice.field, selectedDevice.kind));
+        }).catch(() => {
+            if (!cancelled) setDeviceHistory([]);
+        }).finally(() => {
+            if (!cancelled) setDeviceHistoryLoading(false);
         });
-    }, [config]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedDevice, stageKey]);
 
     useEffect(() => {
         if (!config) {
             return;
         }
 
-        getHistory({ stage: stageKey, limit: MAX_CHART_POINTS }).then((rows) => {
+        getHistory({ stage: stageKey, limit: BACKFILL_HISTORY_LIMIT }).then((rows) => {
             const nextChartData = {};
 
             rows.forEach((row) => {
@@ -131,80 +258,63 @@ export default function StagePage() {
                     }
 
                     const series = [...(nextChartData[sensor] || []), point];
-                    nextChartData[sensor] = series.slice(-MAX_CHART_POINTS);
+                    nextChartData[sensor] = normalizeSeries(series);
                 });
             });
 
             Object.keys(nextChartData).forEach((sensor) => {
-                nextChartData[sensor] = trimToRecentWindow(nextChartData[sensor]);
+                nextChartData[sensor] = normalizeSeries(nextChartData[sensor]);
             });
 
-            setChartData(nextChartData);
+            setStageChartData((prev) => {
+                const previousStageData = prev[stageKey] || {};
+                const merged = { ...prev };
+                const mergedStageData = { ...previousStageData };
+                Object.keys(nextChartData).forEach((sensor) => {
+                    mergedStageData[sensor] = normalizeSeries(
+                        mergeSeries(previousStageData[sensor] || [], nextChartData[sensor] || [])
+                    );
+                });
+                merged[stageKey] = mergedStageData;
+                writeChartSeriesStore(cacheKey, { chartData: mergedStageData });
+                return merged;
+            });
 
             const latestRow = rows.at(-1);
             if (latestRow) {
-                setCurrentData(
-                    buildCurrentData(
-                        config,
-                        latestRow.sensor_values || {},
-                        latestRow.actuator_values || {},
-                        latestRow.raw_values || {}
-                    )
+                const nextCurrentData = buildCurrentData(
+                    config,
+                    latestRow.sensor_values || {},
+                    latestRow.actuator_values || {},
+                    latestRow.raw_values || {}
                 );
+                setStageCurrentData((prev) => ({ ...prev, [stageKey]: nextCurrentData }));
 
                 if (config.monitored) {
-                    setStatus({
-                        mode: latestRow.is_anomaly ? 'danger' : 'normal',
-                        message: latestRow.is_anomaly ? 'DANGER' : 'NORMAL',
-                        detail: latestRow.is_anomaly
-                            ? 'Confirmed anomaly window detected for this stage.'
-                            : 'The stage is within the learned normal window.',
+                    setStageStatuses((prev) => {
+                        if (prev[stageKey]?.mode === 'warming') {
+                            return prev;
+                        }
+
+                        return {
+                            ...prev,
+                            [stageKey]: {
+                            mode: latestRow.is_anomaly ? 'danger' : 'normal',
+                            message: latestRow.is_anomaly ? 'DANGER' : 'NORMAL',
+                            detail: latestRow.is_anomaly
+                                ? 'Confirmed anomaly window detected for this stage.'
+                                : 'The stage is within the learned normal window.',
+                            },
+                        };
                     });
                 }
             }
         }).catch(() => {});
 
         getStatus().then((runtimeStatus) => {
-            const stageStatus = runtimeStatus?.stages?.[stageKey];
-            updateStatusFromStage(stageStatus);
+            applyRuntimeStatus(runtimeStatus);
         }).catch(() => {});
-    }, [config, stageKey, updateStatusFromStage]);
-
-    const handleMessage = useCallback((msg) => {
-        if (msg.type !== 'sensor_update' || !config) return;
-
-        const rawData = msg.raw_data || {};
-        const stageStatus = (msg.stages || []).find((stage) => stage.stage === stageKey);
-        const liveSensorValues = stageStatus?.sensor_values || {};
-        const liveActuatorValues = stageStatus?.actuator_values || {};
-
-        setCurrentData(
-            buildCurrentData(config, liveSensorValues, liveActuatorValues, rawData)
-        );
-
-        const messageTimestamp = stageStatus?.timestamp || msg.timestamp;
-        setChartData((prev) => {
-            const next = { ...prev };
-
-            (config.sensors || []).forEach((sensor) => {
-                const value = parseNumericValue(
-                    liveSensorValues[sensor] ?? rawData[sensor]
-                );
-                const point = buildSeriesPoint(messageTimestamp, value, stageStatus?.is_anomaly);
-                if (!point) {
-                    return;
-                }
-
-                next[sensor] = appendLivePoint(prev[sensor] || [], point);
-            });
-
-            return next;
-        });
-
-        updateStatusFromStage(stageStatus);
-    }, [config, stageKey, updateStatusFromStage]);
-
-    useWebSocket({ onMessage: handleMessage });
+    }, [applyRuntimeStatus, cacheKey, config, setStageChartData, setStageCurrentData, setStageStatuses, stageKey]);
 
     if (!config) return <Navigate to="/" />;
 
@@ -237,7 +347,12 @@ export default function StagePage() {
                     <h3 className="card-title" style={{ marginBottom: 16 }}>Continuous sensors</h3>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 24 }}>
                         {config.sensors.map((sensor) => (
-                            <div key={sensor} style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 16 }}>
+                            <button
+                                key={sensor}
+                                type="button"
+                                className="device-chart-card"
+                                onClick={() => openDeviceHistory({ field: sensor, kind: 'sensor' })}
+                            >
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
                                     <div style={{ fontWeight: 600 }}>{sensor}</div>
                                     <div style={{ color: status.mode === 'danger' ? 'var(--color-critical)' : status.mode === 'warming' ? 'var(--color-medium)' : 'var(--text-primary)', fontWeight: 700 }}>
@@ -249,10 +364,16 @@ export default function StagePage() {
                                 <SensorChart
                                     data={chartData[sensor] || []}
                                     threshold={null}
-                                    height={150}
+                                    height={170}
                                     dataKey="value"
+                                    windowMs={CHART_WINDOW_MS}
+                                    tickStepMs={10000}
+                                    legendLabel={sensor}
+                                    latestValue={currentData[sensor]}
+                                    resetKey={`${stageKey}-${sensor}`}
+                                    gapThresholdMs={STREAM_GAP_THRESHOLD_MS}
                                 />
-                            </div>
+                            </button>
                         ))}
                     </div>
                 </div>
@@ -267,6 +388,16 @@ export default function StagePage() {
                             return (
                                 <div
                                     key={actuator}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => openDeviceHistory({ field: actuator, kind: 'actuator' })}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            openDeviceHistory({ field: actuator, kind: 'actuator' });
+                                        }
+                                    }}
+                                    className="device-actuator-card"
                                     style={{
                                         border: `1px solid ${isActive ? 'var(--color-normal)' : 'var(--border-subtle)'}`,
                                         borderRadius: 8,
@@ -307,6 +438,13 @@ export default function StagePage() {
                     </div>
                 </div>
             </div>
+
+            <DeviceHistoryModal
+                device={selectedDevice}
+                points={deviceHistory}
+                loading={deviceHistoryLoading}
+                onClose={closeDeviceHistory}
+            />
         </div>
     );
 }
