@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { getAlerts, getStatus } from '../services/api';
+import { getAlerts, getHistory, getStatus } from '../services/api';
 import { readSessionState, writeSessionState } from '../services/uiSessionCache';
 import {
     appendSeriesPoint,
+    BACKFILL_HISTORY_LIMIT,
     CHART_HISTORY_MS,
+    mergeSeries,
+    normalizeSeries,
     writeChartSeriesStore,
 } from '../services/chartSeriesStore';
 import { STAGE_CONFIG, STAGES } from '../constants/stages';
@@ -124,6 +127,95 @@ export function ScadaStreamProvider({ children }) {
     const [stageChartData, setStageChartData] = useState(cachedStages.chartData);
     const [stageCurrentData, setStageCurrentData] = useState(cachedStages.currentData);
     const [stageStatuses, setStageStatuses] = useState(cachedStages.statuses);
+
+    const backfillHistory = useCallback(async () => {
+        const histories = await Promise.all(
+            STAGES.map(async (stage) => {
+                const rows = await getHistory({ stage, limit: BACKFILL_HISTORY_LIMIT });
+                return [stage, rows];
+            })
+        );
+
+        const nextDashboardSeries = {};
+        const nextStageSeries = {};
+        const nextScores = {};
+        const nextAnomalyStates = {};
+        const nextCurrentData = {};
+
+        histories.forEach(([stage, rows]) => {
+            const config = STAGE_CONFIG[stage];
+            const zScoreSeries = [];
+            const stageSeries = {};
+
+            rows.forEach((row) => {
+                const ts = parseTimestamp(row.timestamp);
+                if (ts == null) {
+                    return;
+                }
+
+                if (Number.isFinite(row.z_score)) {
+                    zScoreSeries.push({
+                        ts,
+                        score: row.z_score,
+                        isAnomaly: Boolean(row.is_anomaly),
+                    });
+                    nextScores[stage] = row.z_score;
+                    nextAnomalyStates[stage] = Boolean(row.is_anomaly);
+                }
+
+                (config?.sensors || []).forEach((sensor) => {
+                    const value = parseNumericValue(row.sensor_values?.[sensor] ?? row.raw_values?.[sensor]);
+                    const point = buildSeriesPoint(row.timestamp, value, row.is_anomaly);
+                    if (!point) {
+                        return;
+                    }
+                    stageSeries[sensor] = [...(stageSeries[sensor] || []), point];
+                });
+            });
+
+            const latestRow = rows.at(-1);
+            if (latestRow && config) {
+                nextCurrentData[stage] = buildCurrentData(
+                    config,
+                    latestRow.sensor_values || {},
+                    latestRow.actuator_values || {},
+                    latestRow.raw_values || {}
+                );
+            }
+
+            nextDashboardSeries[stage] = normalizeSeries(zScoreSeries);
+            nextStageSeries[stage] = Object.fromEntries(
+                Object.entries(stageSeries).map(([sensor, series]) => [sensor, normalizeSeries(series)])
+            );
+        });
+
+        setDashboardChartData((prev) => {
+            const merged = { ...prev };
+            STAGES.forEach((stage) => {
+                merged[stage] = normalizeSeries(mergeSeries(prev[stage] || [], nextDashboardSeries[stage] || []));
+            });
+            writeChartSeriesStore(DASHBOARD_CACHE_KEY, { chartData: merged });
+            return merged;
+        });
+
+        setStageChartData((prev) => {
+            const merged = { ...prev };
+            STAGES.forEach((stage) => {
+                const previousStageData = prev[stage] || {};
+                const nextStageData = { ...previousStageData };
+                Object.entries(nextStageSeries[stage] || {}).forEach(([sensor, series]) => {
+                    nextStageData[sensor] = normalizeSeries(mergeSeries(previousStageData[sensor] || [], series));
+                });
+                merged[stage] = nextStageData;
+                writeChartSeriesStore(getStageCacheKey(stage), { chartData: nextStageData });
+            });
+            return merged;
+        });
+
+        setScores((prev) => ({ ...prev, ...nextScores }));
+        setAnomalyStates((prev) => ({ ...prev, ...nextAnomalyStates }));
+        setStageCurrentData((prev) => ({ ...prev, ...nextCurrentData }));
+    }, []);
 
     const applyRuntimeStatus = useCallback((runtimeStatus) => {
         setStatus(runtimeStatus);
@@ -254,9 +346,34 @@ export function ScadaStreamProvider({ children }) {
     }, [alerts, anomalyStates, dashboardChartData, scores, status, warmingStates]);
 
     useEffect(() => {
-        getStatus().then(applyRuntimeStatus).catch(() => {});
-        getAlerts({ limit: 30 }).then((data) => setAlerts(data.alerts || data)).catch(() => {});
-    }, [applyRuntimeStatus]);
+        let cancelled = false;
+        const timerId = setTimeout(() => {
+            getStatus()
+                .then((runtimeStatus) => {
+                    if (!cancelled) {
+                        applyRuntimeStatus(runtimeStatus);
+                    }
+                })
+                .catch(() => {});
+
+            getAlerts({ limit: 30 })
+                .then((data) => {
+                    if (!cancelled) {
+                        setAlerts(data.alerts || data);
+                    }
+                })
+                .catch(() => {});
+
+            if (!cancelled) {
+                backfillHistory().catch(() => {});
+            }
+        }, 0);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timerId);
+        };
+    }, [applyRuntimeStatus, backfillHistory]);
 
     useEffect(() => {
         if (!connected) return undefined;

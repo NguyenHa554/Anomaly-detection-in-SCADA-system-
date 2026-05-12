@@ -683,6 +683,26 @@ body {
   overflow: hidden;
 }
 
+.chart-tooltip {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  box-shadow: var(--shadow-card);
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+
+.chart-tooltip-time {
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+}
+
+.chart-tooltip-value {
+  font-weight: 600;
+}
+
 .device-chart-card {
   display: block;
   width: 100%;

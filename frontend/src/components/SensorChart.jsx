@@ -1,9 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid,
     Tooltip, ReferenceLine, ResponsiveContainer, ReferenceArea
 } from 'recharts';
-import { CHART_WINDOW_MS } from '../services/chartSeriesStore';
+import {
+    aggregateSeriesByTime,
+    CHART_WINDOW_MS,
+    resolveChartTickStepMs,
+} from '../services/chartSeriesStore';
 
 const TICK_TIME_FORMATTER = new Intl.DateTimeFormat('vi-VN', {
     hour: '2-digit',
@@ -22,24 +26,54 @@ function formatChartTime(value, formatter) {
     return Number.isNaN(date.getTime()) ? '--' : formatter.format(date);
 }
 
+function formatDisplayValue(value) {
+    return Number.isFinite(value) ? Number(value).toFixed(4) : '--';
+}
+
+function getSortedData(data) {
+    return [...data]
+        .filter((point) => point && Number.isFinite(point.ts))
+        .sort((left, right) => left.ts - right.ts);
+}
+
+function getVisibleData(data, domain) {
+    if (!data.length || !Array.isArray(domain)) {
+        return [];
+    }
+
+    const [start, end] = domain;
+    return data.filter((point) => point.ts >= start && point.ts <= end);
+}
+
 function getNumericValues(data, dataKey) {
     return data
         .map((point) => Number(point[dataKey]))
         .filter((value) => Number.isFinite(value));
 }
 
-function getVisibleData(data, windowMs) {
-    if (!data.length) {
-        return [];
+function getLatestTimestamp(data, windowMs) {
+    if (data.length) {
+        return data.at(-1).ts;
     }
 
-    const latestTimestamp = data.at(-1)?.ts;
-    if (!Number.isFinite(latestTimestamp) || !windowMs) {
-        return data;
+    return windowMs ? Date.now() : null;
+}
+
+function buildTimeDomain(data, windowMs) {
+    const latestTimestamp = getLatestTimestamp(data, windowMs);
+    if (latestTimestamp == null) {
+        return ['auto', 'auto'];
     }
 
-    const windowStart = latestTimestamp - windowMs;
-    return data.filter((point) => point.ts >= windowStart && point.ts <= latestTimestamp);
+    if (windowMs) {
+        return [latestTimestamp - windowMs, latestTimestamp];
+    }
+
+    if (data.length > 1) {
+        return [data[0].ts, data.at(-1).ts];
+    }
+
+    return [latestTimestamp - 1000, latestTimestamp + 1000];
 }
 
 function insertGapBreaks(data, dataKey, gapThresholdMs) {
@@ -81,37 +115,15 @@ function getTargetYDomain(values) {
     const max = Math.max(...values);
     const range = max - min;
     const center = (min + max) / 2;
-    const minVisibleRange = Math.max(Math.abs(center) * 0.01, 0.05);
+    const minVisibleRange = Math.max(Math.abs(center) * 0.012, 0.05);
     const effectiveRange = Math.max(range, minVisibleRange);
-    const padding = effectiveRange * 0.35;
+    const padding = effectiveRange * 0.32;
 
     if (range === 0) {
         return [center - effectiveRange, center + effectiveRange];
     }
 
     return [min - padding, max + padding];
-}
-
-function useStickyYDomain(values, resetKey) {
-    const targetDomain = useMemo(() => {
-        if (values.length === 0) {
-            return ['auto', 'auto'];
-        }
-
-        return getTargetYDomain(values);
-    }, [values]);
-    const targetKey = `${resetKey}:${targetDomain.join(':')}`;
-    const [stickyDomain, setStickyDomain] = useState({ key: targetKey, resetKey, domain: targetDomain });
-
-    if (stickyDomain.key !== targetKey) {
-        const nextDomain = stickyDomain.resetKey === resetKey
-            ? getNextStickyDomain(stickyDomain.domain, targetDomain)
-            : targetDomain;
-        setStickyDomain({ key: targetKey, resetKey, domain: nextDomain });
-        return nextDomain;
-    }
-
-    return stickyDomain.domain;
 }
 
 function getNextStickyDomain(previousDomain, targetDomain) {
@@ -132,11 +144,22 @@ function getNextStickyDomain(previousDomain, targetDomain) {
         ];
     }
 
-    const shrinkRate = 0.08;
+    const shrinkRate = 0.06;
     return [
         previousMin + (targetMin - previousMin) * shrinkRate,
         previousMax + (targetMax - previousMax) * shrinkRate,
     ];
+}
+
+const STICKY_Y_DOMAINS = new Map();
+
+function getStickyYDomain(values, resetKey) {
+    const targetDomain = getTargetYDomain(values);
+    const previousDomain = STICKY_Y_DOMAINS.get(resetKey);
+    const domain = getNextStickyDomain(previousDomain, targetDomain);
+
+    STICKY_Y_DOMAINS.set(resetKey, domain);
+    return domain;
 }
 
 function formatYAxisTick(value, valueRange) {
@@ -167,41 +190,59 @@ function buildTimeTicks(domain, tickStepMs) {
         ticks.push(tick);
     }
 
-    if (!ticks.includes(start)) {
+    if (!ticks.length) {
+        return [start, end];
+    }
+
+    if (ticks[0] - start > tickStepMs * 0.6) {
         ticks.unshift(start);
     }
-    if (!ticks.includes(end)) {
+    if (end - ticks.at(-1) > tickStepMs * 0.6) {
         ticks.push(end);
     }
 
     return ticks;
 }
 
-function formatDisplayValue(value) {
-    return Number.isFinite(value) ? Number(value).toFixed(4) : '--';
+function useElementWidth() {
+    const ref = useRef(null);
+    const [width, setWidth] = useState(0);
+
+    useEffect(() => {
+        const element = ref.current;
+        if (!element) {
+            return undefined;
+        }
+
+        const updateWidth = () => {
+            setWidth(element.getBoundingClientRect().width);
+        };
+
+        updateWidth();
+        const resizeObserver = new ResizeObserver(updateWidth);
+        resizeObserver.observe(element);
+
+        return () => resizeObserver.disconnect();
+    }, []);
+
+    return [ref, width];
 }
 
 function CustomTooltip({ active, payload, label }) {
     if (!active || !payload?.length) return null;
 
     return (
-        <div style={{
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '8px 12px',
-            boxShadow: 'var(--shadow-card)',
-            fontSize: '0.8rem',
-            color: 'var(--text-primary)'
-        }}>
-            <p style={{ color: 'var(--text-muted)', marginBottom: 4, fontSize: '0.75rem' }}>
+        <div className="chart-tooltip">
+            <p className="chart-tooltip-time">
                 Time: {formatChartTime(label, TOOLTIP_TIME_FORMATTER)}
             </p>
-            {payload.map((point) => (
-                <p key={point.dataKey} style={{ color: point.color, fontWeight: 600 }}>
-                    Value: {Number(point.value).toFixed(4)}
-                </p>
-            ))}
+            {payload
+                .filter((point) => Number.isFinite(Number(point.value)))
+                .map((point) => (
+                    <p key={point.dataKey} className="chart-tooltip-value" style={{ color: point.color }}>
+                        Value: {Number(point.value).toFixed(4)}
+                    </p>
+                ))}
         </div>
     );
 }
@@ -218,31 +259,51 @@ export default function SensorChart({
     latestValue = null,
     resetKey = dataKey,
     gapThresholdMs = null,
+    aggregation = 'latest',
+    minTickPx = 86,
 }) {
     const color = '#1a73e8';
-    const fillColor = 'rgba(26, 115, 232, 0.1)';
-    const sortedData = useMemo(
-        () => [...data].filter((point) => Number.isFinite(point?.ts)).sort((left, right) => left.ts - right.ts),
-        [data]
-    );
-    const latestTimestamp = sortedData.length ? sortedData.at(-1).ts : null;
-    const visibleData = useMemo(() => getVisibleData(sortedData, windowMs), [sortedData, windowMs]);
+    const [containerRef, containerWidth] = useElementWidth();
+    const sortedData = useMemo(() => getSortedData(data), [data]);
+    const xDomain = useMemo(() => buildTimeDomain(sortedData, windowMs), [sortedData, windowMs]);
+    const effectiveTickStepMs = useMemo(() => resolveChartTickStepMs({
+        windowMs: Array.isArray(xDomain) ? xDomain[1] - xDomain[0] : windowMs,
+        width: containerWidth,
+        preferredStepMs: tickStepMs,
+        minTickPx,
+    }), [containerWidth, minTickPx, tickStepMs, windowMs, xDomain]);
+
+    const visibleData = useMemo(() => getVisibleData(sortedData, xDomain), [sortedData, xDomain]);
+    const aggregatedData = useMemo(() => aggregateSeriesByTime(visibleData, {
+        dataKey,
+        intervalMs: Math.max(1000, Math.min(effectiveTickStepMs, 5000)),
+        mode: aggregation,
+    }), [aggregation, dataKey, effectiveTickStepMs, visibleData]);
     const chartData = useMemo(
-        () => insertGapBreaks(visibleData, dataKey, gapThresholdMs),
-        [dataKey, gapThresholdMs, visibleData]
+        () => insertGapBreaks(aggregatedData, dataKey, gapThresholdMs),
+        [aggregatedData, dataKey, gapThresholdMs]
     );
-    const values = useMemo(() => getNumericValues(visibleData, dataKey), [visibleData, dataKey]);
-    const yDomain = useStickyYDomain(values, resetKey);
+    const values = useMemo(() => getNumericValues(aggregatedData, dataKey), [aggregatedData, dataKey]);
+    const domainValues = useMemo(() => (
+        threshold !== null && Number.isFinite(Number(threshold))
+            ? [...values, Number(threshold)]
+            : values
+    ), [threshold, values]);
+    const yDomain = useMemo(
+        () => getStickyYDomain(domainValues, resetKey),
+        [domainValues, resetKey]
+    );
     const yRange = values.length ? Math.max(...values) - Math.min(...values) : 1;
     const chartLatestValue = latestValue ?? visibleData.at(-1)?.[dataKey];
+    const xTicks = Array.isArray(xDomain) ? buildTimeTicks(xDomain, effectiveTickStepMs) : undefined;
 
-    const areas = [];
+    const anomalyAreas = [];
     let currentArea = null;
 
     chartData.forEach((point) => {
         if (point.isGap) {
             if (currentArea) {
-                areas.push(currentArea);
+                anomalyAreas.push(currentArea);
                 currentArea = null;
             }
             return;
@@ -255,26 +316,17 @@ export default function SensorChart({
                 currentArea.x2 = point.ts;
             }
         } else if (currentArea) {
-            areas.push(currentArea);
+            anomalyAreas.push(currentArea);
             currentArea = null;
         }
     });
 
     if (currentArea) {
-        areas.push(currentArea);
+        anomalyAreas.push(currentArea);
     }
 
-    const xDomain = windowMs && latestTimestamp != null
-        ? [latestTimestamp - windowMs, latestTimestamp]
-        : sortedData.length > 1
-            ? ['dataMin', 'dataMax']
-        : sortedData.length === 1
-            ? [sortedData[0].ts - 1000, sortedData[0].ts + 1000]
-            : ['auto', 'auto'];
-    const xTicks = Array.isArray(xDomain) ? buildTimeTicks(xDomain, tickStepMs) : undefined;
-
     return (
-        <div className="chart-body">
+        <div className="chart-body" ref={containerRef}>
             {legendLabel && (
                 <div className="chart-meta-row">
                     <div className="chart-legend">
@@ -299,8 +351,8 @@ export default function SensorChart({
                         tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                         tickLine={false}
                         axisLine={{ stroke: 'var(--border-subtle)' }}
-                        interval="preserveStart"
-                        minTickGap={28}
+                        interval={0}
+                        minTickGap={18}
                         tickFormatter={(value) => formatChartTime(value, TICK_TIME_FORMATTER)}
                     />
                     <YAxis
@@ -308,17 +360,17 @@ export default function SensorChart({
                         tickLine={false}
                         axisLine={{ stroke: 'var(--border-subtle)' }}
                         domain={yDomain}
-                        width={56}
-                        tickCount={4}
+                        width={58}
+                        tickCount={5}
                         minTickGap={8}
                         allowDecimals
                         tickFormatter={(value) => formatYAxisTick(value, yRange)}
                     />
                     <Tooltip content={<CustomTooltip />} />
 
-                    {areas.map((area, index) => (
+                    {anomalyAreas.map((area) => (
                         <ReferenceArea
-                            key={index}
+                            key={`${area.x1}-${area.x2}`}
                             x1={area.x1}
                             x2={area.x2}
                             fill="var(--color-critical)"
@@ -352,7 +404,6 @@ export default function SensorChart({
                         dot={false}
                         activeDot={{ r: 4, fill: '#fff', stroke: color, strokeWidth: 2 }}
                         isAnimationActive={false}
-                        fill={fillColor}
                     />
                 </LineChart>
             </ResponsiveContainer>

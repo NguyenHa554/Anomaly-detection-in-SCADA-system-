@@ -1,26 +1,11 @@
-import { useEffect, useCallback, useMemo } from 'react';
-import { getHistory } from '../services/api';
-import {
-    BACKFILL_HISTORY_LIMIT,
-    CHART_WINDOW_MS,
-    mergeSeries,
-    normalizeSeries,
-} from '../services/chartSeriesStore';
+import { useCallback, useMemo } from 'react';
+import { CHART_WINDOW_MS } from '../services/chartSeriesStore';
 import { useScadaStream } from '../context/scadaStreamContextValue';
 import StatusCard from '../components/StatusCard';
 import StageIndicator from '../components/StageIndicator';
 import SensorChart from '../components/SensorChart';
 import AlertPanel from '../components/AlertPanel';
 import { STAGE_CONFIG, STAGES, MONITORED_STAGES, MONITORING_ONLY_STAGES } from '../constants/stages';
-
-const EMPTY_CHART_DATA = Object.fromEntries(STAGES.map((stage) => [stage, []]));
-const EMPTY_SCORES = Object.fromEntries(STAGES.map((stage) => [stage, null]));
-const EMPTY_ANOMALY_STATES = Object.fromEntries(STAGES.map((stage) => [stage, false]));
-
-function parseTimestamp(value) {
-    const timestamp = Date.parse(value);
-    return Number.isFinite(timestamp) ? timestamp : null;
-}
 
 export default function Dashboard() {
     const {
@@ -29,56 +14,9 @@ export default function Dashboard() {
         dashboardChartData: chartData,
         scores,
         setAlerts,
-        setAnomalyStates,
-        setDashboardChartData: setChartData,
-        setScores,
         status,
         warmingStates,
     } = useScadaStream();
-
-    useEffect(() => {
-        Promise.all(
-            MONITORED_STAGES.map(async (stage) => {
-                const rows = await getHistory({ stage, limit: BACKFILL_HISTORY_LIMIT });
-                return [stage, rows];
-            })
-        ).then((stageHistories) => {
-            const nextChartData = { ...EMPTY_CHART_DATA };
-            const nextScores = { ...EMPTY_SCORES };
-            const nextAnomalyStates = { ...EMPTY_ANOMALY_STATES };
-
-            stageHistories.forEach(([stage, rows]) => {
-                const series = [];
-
-                rows.forEach((row) => {
-                    const ts = parseTimestamp(row.timestamp);
-                    if (!row.stage || ts == null || !Number.isFinite(row.z_score)) return;
-
-                    series.push({
-                        ts,
-                        score: row.z_score,
-                        isAnomaly: Boolean(row.is_anomaly),
-                    });
-                    nextScores[stage] = row.z_score;
-                    nextAnomalyStates[stage] = Boolean(row.is_anomaly);
-                });
-
-                nextChartData[stage] = normalizeSeries(series);
-            });
-
-            setChartData((prev) => {
-                const merged = { ...prev };
-                MONITORED_STAGES.forEach((stage) => {
-                    merged[stage] = normalizeSeries(
-                        mergeSeries(prev[stage] || [], nextChartData[stage] || [])
-                    );
-                });
-                return merged;
-            });
-            setScores((prev) => ({ ...prev, ...nextScores }));
-            setAnomalyStates((prev) => ({ ...prev, ...nextAnomalyStates }));
-        }).catch(() => {});
-    }, [setAnomalyStates, setChartData, setScores]);
 
     const effectiveWarmingStates = useMemo(() => {
         const next = { ...warmingStates };
@@ -231,10 +169,12 @@ export default function Dashboard() {
                                         height={260}
                                         windowMs={CHART_WINDOW_MS}
                                         tickStepMs={5000}
+                                        minTickPx={92}
                                         showMiniOverview
                                         legendLabel={`Z-score ${stage}`}
                                         latestValue={chartScore}
                                         resetKey={`dashboard-${stage}`}
+                                        aggregation="max"
                                     />
                                 </div>
                             );

@@ -61,7 +61,7 @@ function buildDeviceHistory(rows, field, kind) {
         const ts = parseTimestamp(row.timestamp);
         return ts != null && ts > latest ? ts : latest;
     }, 0);
-    const dayStart = latestTimestamp ? latestTimestamp - 24 * 60 * 60 * 1000 : 0;
+    const historyStart = latestTimestamp ? latestTimestamp - DEVICE_HISTORY_WINDOW_MS : 0;
 
     return rows
         .map((row) => {
@@ -70,7 +70,7 @@ function buildDeviceHistory(rows, field, kind) {
             const fallbackSource = row.raw_values || {};
             const value = parseNumericValue(source?.[field] ?? fallbackSource[field]);
 
-            if (timestamp == null || value == null || (dayStart && timestamp < dayStart)) {
+            if (timestamp == null || value == null || (historyStart && timestamp < historyStart)) {
                 return null;
             }
 
@@ -99,12 +99,12 @@ function DeviceHistoryModal({ device, points, loading, onClose }) {
 
     return (
         <div className="device-modal-backdrop" role="presentation" onClick={onClose}>
-            <section className="device-modal" role="dialog" aria-modal="true" aria-label={`${device.field} 24 hour history`} onClick={(event) => event.stopPropagation()}>
+            <section className="device-modal" role="dialog" aria-modal="true" aria-label={`${device.field} 1 hour history`} onClick={(event) => event.stopPropagation()}>
                 <div className="device-modal-header">
                     <div>
                         <div className="device-modal-eyebrow">{device.kind === 'actuator' ? 'Actuator' : 'Sensor'} history</div>
                         <h2 className="device-modal-title">{device.field}</h2>
-                        <div className="device-modal-subtitle">Last 24 hours from stored stage history</div>
+                        <div className="device-modal-subtitle">Last 1 hour from stored stage history</div>
                     </div>
                     <button className="device-modal-close" type="button" onClick={onClose} aria-label="Close device history">
                         <span className="material-symbols-outlined">close</span>
@@ -140,10 +140,12 @@ function DeviceHistoryModal({ device, points, loading, onClose }) {
                             height={300}
                             dataKey="value"
                             windowMs={DEVICE_HISTORY_WINDOW_MS}
-                            tickStepMs={60 * 60 * 1000}
+                            tickStepMs={5 * 60 * 1000}
+                            minTickPx={112}
                             showMiniOverview
                             resetKey={`modal-${device.field}`}
                             gapThresholdMs={DAY_HISTORY_GAP_THRESHOLD_MS}
+                            aggregation="avg"
                         />
                     ) : (
                         <div className="device-modal-empty">No stored values for this device</div>
@@ -368,10 +370,12 @@ export default function StagePage() {
                                     dataKey="value"
                                     windowMs={CHART_WINDOW_MS}
                                     tickStepMs={10000}
+                                    minTickPx={96}
                                     legendLabel={sensor}
                                     latestValue={currentData[sensor]}
                                     resetKey={`${stageKey}-${sensor}`}
                                     gapThresholdMs={STREAM_GAP_THRESHOLD_MS}
+                                    aggregation="latest"
                                 />
                             </button>
                         ))}
