@@ -5,7 +5,7 @@ Start with: uvicorn backend.main:app --reload --port 8000
 
 import os
 from contextlib import asynccontextmanager
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,9 +15,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
-from backend.database import create_tables, get_db, Alert, clear_runtime_data
+from backend.database import create_tables, get_db, Alert, Incident, clear_runtime_data
 from backend.services.anomaly_detector import detector, STAGE_FEATURES
 from backend.services.data_pipeline import process_row, reset_runtime_state
+from backend.services.incident_service import (
+    incident_service,
+    incident_to_alert_dict,
+    incident_to_dict,
+)
 
 
 # ── WebSocket Manager ─────────────────────────────────────────────────────────
@@ -89,9 +94,36 @@ class AlertOut(BaseModel):
     threshold: float
     message: str
     acknowledged: bool
+    incident_id: Optional[int] = None
+    affected_stages: Optional[List[str]] = None
+    first_detected_stage: Optional[str] = None
+    primary_stage: Optional[str] = None
+    status: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class IncidentOut(BaseModel):
+    id: int
+    incident_id: int
+    created_at: datetime
+    updated_at: datetime
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    status: str
+    severity: str
+    stage: str
+    first_detected_stage: str
+    primary_stage: str
+    affected_stages: List[str]
+    max_z_score: float
+    threshold: float
+    anomaly_score: float
+    evidence: Dict
+    message: str
+    acknowledged: bool
+    acknowledged_at: Optional[datetime] = None
 
 
 # ── REST endpoints ─────────────────────────────────────────────────────────────
@@ -152,24 +184,76 @@ def reset_runtime():
 
 @app.get("/api/alerts", response_model=List[AlertOut])
 def get_alerts(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
-    return (
-        db.query(Alert)
-        .order_by(Alert.created_at.desc())
+    incident_service.close_expired(db)
+    db.commit()
+
+    incidents = (
+        db.query(Incident)
+        .order_by(Incident.created_at.desc())
         .offset(skip)
         .limit(limit)
         .all()
     )
+    if incidents:
+        return [incident_to_alert_dict(incident) for incident in incidents]
+
+    return db.query(Alert).order_by(Alert.created_at.desc()).offset(skip).limit(limit).all()
 
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
 def acknowledge_alert(alert_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).filter(Incident.id == alert_id).first()
+    if incident:
+        incident.acknowledged = True
+        incident.acknowledged_at = datetime.now(timezone.utc)
+        alerts = db.query(Alert).filter(Alert.incident_id == incident.id).all()
+        for alert in alerts:
+            alert.acknowledged = True
+            alert.acknowledged_at = incident.acknowledged_at
+        db.commit()
+        return {"ok": True, "id": alert_id, "incident_id": incident.id}
+
     alert = db.query(Alert).filter(Alert.id == alert_id).first()
     if not alert:
         raise HTTPException(404, "Alert not found.")
-    alert.acknowledged    = True
+    alert.acknowledged = True
     alert.acknowledged_at = datetime.now(timezone.utc)
+    if alert.incident_id:
+        linked_incident = db.query(Incident).filter(Incident.id == alert.incident_id).first()
+        if linked_incident:
+            linked_incident.acknowledged = True
+            linked_incident.acknowledged_at = alert.acknowledged_at
     db.commit()
     return {"ok": True, "id": alert_id}
+
+
+@app.get("/api/incidents", response_model=List[IncidentOut])
+def get_incidents(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    incident_service.close_expired(db)
+    db.commit()
+    incidents = (
+        db.query(Incident)
+        .order_by(Incident.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return [incident_to_dict(incident) for incident in incidents]
+
+
+@app.post("/api/incidents/{incident_id}/acknowledge")
+def acknowledge_incident(incident_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if not incident:
+        raise HTTPException(404, "Incident not found.")
+    incident.acknowledged = True
+    incident.acknowledged_at = datetime.now(timezone.utc)
+    alerts = db.query(Alert).filter(Alert.incident_id == incident.id).all()
+    for alert in alerts:
+        alert.acknowledged = True
+        alert.acknowledged_at = incident.acknowledged_at
+    db.commit()
+    return {"ok": True, "id": incident_id}
 
 
 @app.get("/api/history")

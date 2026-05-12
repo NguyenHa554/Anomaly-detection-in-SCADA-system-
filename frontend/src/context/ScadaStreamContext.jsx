@@ -229,6 +229,12 @@ export function ScadaStreamProvider({ children }) {
             setAlerts((prev) => [msg.alert, ...prev].slice(0, 100));
         }
 
+        if (msg.type === 'incident_update' && msg.alert) {
+            setAlerts((prev) => prev.map((alert) => (
+                alert.id === msg.alert.id ? { ...alert, ...msg.alert } : alert
+            )));
+        }
+
         if (msg.type === 'status') {
             applyRuntimeStatus(msg);
         }

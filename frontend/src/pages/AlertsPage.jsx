@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Download } from 'lucide-react';
-import { getAlerts, acknowledgeAlert } from '../services/api';
+import { getIncidents, acknowledgeIncident } from '../services/api';
 
 const SEVERITIES = ['ALL', 'DANGER'];
 const STAGES = ['ALL', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
@@ -23,13 +23,16 @@ export default function AlertsPage() {
     const [loading, setLoading] = useState(true);
     const [filterSev, setFilterSev] = useState('ALL');
     const [filterStage, setFilterStage] = useState('ALL');
+    const [selectedIncident, setSelectedIncident] = useState(null);
 
     const fetchAlerts = useCallback(async () => {
         setLoading(true);
         try {
             const params = { limit: 200 };
-            const data = await getAlerts(params);
-            setAlerts(data.alerts || data);
+            const data = await getIncidents(params);
+            const incidents = data.incidents || data;
+            setAlerts(incidents);
+            setSelectedIncident((current) => current || incidents[0] || null);
         } catch (err) {
             console.error(err);
         } finally {
@@ -41,8 +44,9 @@ export default function AlertsPage() {
 
     async function handleAck(id) {
         try {
-            await acknowledgeAlert(id);
+            await acknowledgeIncident(id);
             setAlerts(prev => prev.map(a => a.id === id ? { ...a, acknowledged: true } : a));
+            setSelectedIncident(prev => prev?.id === id ? { ...prev, acknowledged: true } : prev);
         } catch (err) {
             console.error(err);
         }
@@ -165,7 +169,7 @@ export default function AlertsPage() {
                                     </thead>
                                     <tbody>
                                         {filtered.map(a => (
-                                            <tr key={a.id}>
+                                            <tr key={a.id} onClick={() => setSelectedIncident(a)} style={{ cursor: 'pointer' }}>
                                                 <td>{formatDateTime(a.created_at || a.timestamp)}</td>
                                                 <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
                                                     Sự cố {a.stage}<br />
@@ -218,6 +222,27 @@ export default function AlertsPage() {
 
                     {/* Right Grid: Stats & Charts (Mockup visuals) */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                        <div className="card">
+                            <div className="card-header">
+                                <h3 className="card-title" style={{ fontSize: '0.85rem' }}>Incident detail</h3>
+                                <span className="material-symbols-outlined" style={{ color: 'var(--text-muted)', fontSize: 16 }}>account_tree</span>
+                            </div>
+                            <div style={{ padding: 20, display: 'grid', gap: 12, fontSize: '0.82rem' }}>
+                                {selectedIncident ? (
+                                    <>
+                                        <div><strong>Incident:</strong> #{selectedIncident.id}</div>
+                                        <div><strong>Status:</strong> {selectedIncident.status || 'OPEN'}</div>
+                                        <div><strong>Primary stage:</strong> {selectedIncident.primary_stage || selectedIncident.stage}</div>
+                                        <div><strong>First detected:</strong> {selectedIncident.first_detected_stage || selectedIncident.stage}</div>
+                                        <div><strong>Affected:</strong> {(selectedIncident.affected_stages || [selectedIncident.stage]).filter(Boolean).join(', ')}</div>
+                                        <div><strong>Max z-score:</strong> {selectedIncident.max_z_score != null ? Number(selectedIncident.max_z_score).toFixed(2) : '--'}</div>
+                                        <div><strong>Message:</strong> {selectedIncident.message || 'Grouped anomaly incident'}</div>
+                                    </>
+                                ) : (
+                                    <div style={{ color: 'var(--text-muted)' }}>Select an incident to inspect evidence.</div>
+                                )}
+                            </div>
+                        </div>
                         <div className="card">
                             <div className="card-header">
                                 <h3 className="card-title" style={{ fontSize: '0.85rem' }}>Phân bổ sự cố theo khu vực</h3>

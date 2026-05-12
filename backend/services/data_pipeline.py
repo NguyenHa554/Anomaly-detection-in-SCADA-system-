@@ -8,7 +8,8 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from backend.services.anomaly_detector import detector, STAGE_FEATURES
-from backend.services.alert_service import alert_service, get_alert_type
+from backend.services.alert_service import get_alert_type
+from backend.services.incident_service import incident_service
 from backend.database import SensorReading, Anomaly
 
 STAGE_DISPLAY_FIELDS = {
@@ -153,15 +154,20 @@ async def process_row(row: Dict, db: Session, broadcast_fn) -> Dict:
             )
             db.add(anomaly)
 
-        # Only production stages contribute to final alerts. P6 remains visible for analysis.
+        # Only production stages contribute to final incidents. P6 remains visible for analysis.
         if (
             result.get("status") == "ok"
             and is_episode_start
             and stage in ALERTING_STAGES
         ):
-            alert_dict = alert_service.process(result, db)
-            if alert_dict:
-                await broadcast_fn({"type": "alert", "alert": alert_dict})
+            incident_result = incident_service.process(result, db)
+            if incident_result:
+                message_type = "alert" if incident_result["created"] else "incident_update"
+                await broadcast_fn({
+                    "type": message_type,
+                    "alert": incident_result["alert"],
+                    "incident": incident_result["incident"],
+                })
 
         stage_results.append(result)
 

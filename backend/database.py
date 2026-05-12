@@ -64,11 +64,34 @@ class Alert(Base):
     message         = Column(String)
     acknowledged    = Column(Boolean, default=False)
     acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    incident_id     = Column(Integer, nullable=True, index=True)
+
+
+class Incident(Base):
+    __tablename__ = "incidents"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    created_at           = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at           = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    start_time           = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    end_time             = Column(DateTime(timezone=True), nullable=True)
+    status               = Column(String(20), default="OPEN", index=True)
+    severity             = Column(String(20), default="DANGER")
+    first_detected_stage = Column(String(10))
+    primary_stage        = Column(String(10))
+    affected_stages      = Column(JSON, nullable=True)
+    max_z_score          = Column(Float)
+    threshold            = Column(Float)
+    anomaly_score        = Column(Float)
+    evidence             = Column(JSON, nullable=True)
+    acknowledged         = Column(Boolean, default=False)
+    acknowledged_at      = Column(DateTime(timezone=True), nullable=True)
 
 
 def create_tables():
     Base.metadata.create_all(bind=engine)
     _ensure_sensor_data_columns()
+    _ensure_alert_columns()
 
 
 def _ensure_sensor_data_columns():
@@ -89,6 +112,15 @@ def _ensure_sensor_data_columns():
             )
 
 
+def _ensure_alert_columns():
+    inspector = inspect(engine)
+    existing_columns = {col["name"] for col in inspector.get_columns("alerts")}
+
+    with engine.begin() as connection:
+        if "incident_id" not in existing_columns:
+            connection.execute(text("ALTER TABLE alerts ADD COLUMN incident_id INTEGER"))
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -102,4 +134,5 @@ def clear_runtime_data():
         db.query(Alert).delete()
         db.query(Anomaly).delete()
         db.query(SensorReading).delete()
+        db.query(Incident).delete()
         db.commit()

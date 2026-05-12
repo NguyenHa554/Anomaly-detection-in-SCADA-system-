@@ -32,6 +32,18 @@ export const getAlerts = (params = {}) => {
 export const acknowledgeAlert = (id) =>
     request(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
 
+/** GET /api/incidents */
+export const getIncidents = (params = {}) => {
+    const qs = new URLSearchParams(
+        Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== ''))
+    ).toString();
+    return request(`/api/incidents${qs ? `?${qs}` : ''}`);
+};
+
+/** POST /api/incidents/:id/acknowledge */
+export const acknowledgeIncident = (id) =>
+    request(`/api/incidents/${id}/acknowledge`, { method: 'POST' });
+
 /** GET /api/history?stage=P1&limit=200 */
 export const getHistory = (stageOrOptions, limit = 200) => {
     const options = typeof stageOrOptions === 'object' && stageOrOptions !== null

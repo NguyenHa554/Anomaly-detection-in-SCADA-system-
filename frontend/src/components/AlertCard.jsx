@@ -1,7 +1,7 @@
 import { acknowledgeAlert } from '../services/api';
 
 function formatTime(ts) {
-    if (!ts) return '—';
+    if (!ts) return '--';
     const d = new Date(ts);
     return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 }
@@ -9,6 +9,7 @@ function formatTime(ts) {
 export default function AlertCard({ alert, onAcknowledged }) {
     const sev = (alert.severity || 'DANGER').toLowerCase();
     const acked = alert.acknowledged;
+    const affectedStages = alert.affected_stages || (alert.stage ? [alert.stage] : []);
 
     async function handleAck() {
         try {
@@ -32,16 +33,17 @@ export default function AlertCard({ alert, onAcknowledged }) {
 
             <div>
                 <div className="alert-msg-title">
-                    {alert.message ? alert.message.split(' at ')[0] : 'Sự cố bất thường'}
+                    {alert.incident_id ? `Incident #${alert.incident_id}` : 'Anomaly incident'}
                 </div>
                 <div className="alert-msg-desc">
-                    Confirmed episode start. Max z-score {alert.max_z_score != null ? Number(alert.max_z_score).toFixed(2) : '—'} over threshold ({alert.threshold || 2.0}).
+                    Primary {alert.primary_stage || alert.stage || '--'}. Affected: {affectedStages.join(', ') || '--'}.
+                    {' '}Max z-score {alert.max_z_score != null ? Number(alert.max_z_score).toFixed(2) : '--'}.
                 </div>
             </div>
 
             {!acked && (
                 <button className="btn-acknowledge" onClick={handleAck}>
-                    Xác nhận xử lý
+                    Acknowledge
                 </button>
             )}
         </div>

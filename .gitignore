@@ -56,3 +56,6 @@ yarn-error.log
 
 #database
 *.db
+
+#thingsboard
+thingsboard-master/
