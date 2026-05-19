@@ -12,6 +12,7 @@ import {
 } from '../services/chartSeriesStore';
 import { STAGE_CONFIG, STAGES } from '../constants/stages';
 import { ScadaStreamContext } from './scadaStreamContextValue';
+import { parseBackendTimestamp } from '../utils/time';
 const DASHBOARD_CACHE_KEY = 'dashboard-session-v2';
 const EMPTY_CHART_DATA = Object.fromEntries(STAGES.map((stage) => [stage, []]));
 const EMPTY_SCORES = Object.fromEntries(STAGES.map((stage) => [stage, null]));
@@ -25,8 +26,7 @@ function getStageCacheKey(stageKey) {
 }
 
 function parseTimestamp(value) {
-    const timestamp = Date.parse(value);
-    return Number.isFinite(timestamp) ? timestamp : null;
+    return parseBackendTimestamp(value);
 }
 
 function parseNumericValue(value) {

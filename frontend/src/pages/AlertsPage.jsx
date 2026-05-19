@@ -1,18 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Download } from 'lucide-react';
 import { getIncidents, acknowledgeIncident } from '../services/api';
+import { formatBackendDate, formatBackendTime } from '../utils/time';
 
 const SEVERITIES = ['ALL', 'DANGER'];
 const STAGES = ['ALL', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
 
 function formatDateTime(ts) {
-    if (!ts) return '—';
-    const d = new Date(ts);
+    if (!ts) return '--';
     return (
         <span>
-            <strong>{d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</strong><br />
+            <strong>{formatBackendTime(ts, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</strong><br />
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                {d.toLocaleDateString('vi-VN')}
+                {formatBackendDate(ts)}
             </span>
         </span>
     );
@@ -294,5 +294,4 @@ export default function AlertsPage() {
         </div>
     );
 }
-
 

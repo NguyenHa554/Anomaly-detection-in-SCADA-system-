@@ -6,6 +6,7 @@ import StageIndicator from '../components/StageIndicator';
 import SensorChart from '../components/SensorChart';
 import AlertPanel from '../components/AlertPanel';
 import { STAGE_CONFIG, STAGES, MONITORED_STAGES, MONITORING_ONLY_STAGES } from '../constants/stages';
+import { formatBackendTime } from '../utils/time';
 
 export default function Dashboard() {
     const {
@@ -44,7 +45,7 @@ export default function Dashboard() {
 
     const monitoringOnlyLabel = MONITORING_ONLY_STAGES.join(', ');
     const updatedTime = status?.server_time
-        ? new Date(status.server_time).toLocaleTimeString('vi-VN')
+        ? formatBackendTime(status.server_time)
         : '--';
 
     const systemStatusValue = hasAnomaly ? 'DANGER' : hasWarming ? 'WARMING UP' : 'NORMAL';

@@ -23,6 +23,7 @@ from backend.services.incident_service import (
     incident_to_alert_dict,
     incident_to_dict,
 )
+from backend.utils.time import utc_isoformat
 
 
 # ── WebSocket Manager ─────────────────────────────────────────────────────────
@@ -197,7 +198,26 @@ def get_alerts(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
     if incidents:
         return [incident_to_alert_dict(incident) for incident in incidents]
 
-    return db.query(Alert).order_by(Alert.created_at.desc()).offset(skip).limit(limit).all()
+    alerts = db.query(Alert).order_by(Alert.created_at.desc()).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": alert.id,
+            "created_at": utc_isoformat(alert.created_at),
+            "stage": alert.stage,
+            "severity": alert.severity,
+            "anomaly_score": alert.anomaly_score,
+            "max_z_score": alert.max_z_score,
+            "threshold": alert.threshold,
+            "message": alert.message,
+            "acknowledged": bool(alert.acknowledged),
+            "incident_id": alert.incident_id,
+            "affected_stages": None,
+            "first_detected_stage": None,
+            "primary_stage": alert.stage,
+            "status": None,
+        }
+        for alert in alerts
+    ]
 
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
@@ -266,7 +286,7 @@ def get_history(stage: str = None, limit: int = 500, db: Session = Depends(get_d
     return [
         {
             "id":             r.id,
-            "timestamp":      r.timestamp.isoformat() if r.timestamp else None,
+            "timestamp":      utc_isoformat(r.timestamp),
             "stage":          r.stage,
             "z_score":        r.z_score,
             "is_anomaly": r.is_anomaly,

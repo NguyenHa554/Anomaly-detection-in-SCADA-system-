@@ -20,6 +20,11 @@ export default function Sidebar() {
                     Tổng quan
                 </NavLink>
 
+                <NavLink to="/process" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
+                    <span className="material-symbols-outlined">schema</span>
+                    Process View
+                </NavLink>
+
                 <div className="sidebar-group">
                     <div className="sidebar-link" style={{ cursor: 'default', color: 'var(--text-primary)', fontWeight: 600 }}>
                         <span className="material-symbols-outlined">account_tree</span>

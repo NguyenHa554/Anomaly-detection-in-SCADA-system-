@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
+import ProcessViewPage from './pages/ProcessViewPage';
 import StagePage from './pages/StagePage';
 import AlertsPage from './pages/AlertsPage';
 import UploadPage from './pages/UploadPage';
@@ -18,6 +19,7 @@ export default function App() {
           <main className="main-content">
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/process" element={<ProcessViewPage />} />
               <Route path="/stages/:stageId" element={<StagePage />} />
               <Route path="/incidents" element={<AlertsPage />} />
               <Route path="/reports" element={<ReportsPage />} />

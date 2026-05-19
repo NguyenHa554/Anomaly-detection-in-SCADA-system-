@@ -260,6 +260,7 @@ export default function SensorChart({
     resetKey = dataKey,
     gapThresholdMs = null,
     aggregation = 'latest',
+    aggregationIntervalMs = null,
     minTickPx = 86,
 }) {
     const color = '#1a73e8';
@@ -274,11 +275,18 @@ export default function SensorChart({
     }), [containerWidth, minTickPx, tickStepMs, windowMs, xDomain]);
 
     const visibleData = useMemo(() => getVisibleData(sortedData, xDomain), [sortedData, xDomain]);
+    const effectiveAggregationIntervalMs = useMemo(() => {
+        if (Number.isFinite(aggregationIntervalMs)) {
+            return Math.max(1000, aggregationIntervalMs);
+        }
+
+        return Math.max(1000, Math.min(effectiveTickStepMs, 5000));
+    }, [aggregationIntervalMs, effectiveTickStepMs]);
     const aggregatedData = useMemo(() => aggregateSeriesByTime(visibleData, {
         dataKey,
-        intervalMs: Math.max(1000, Math.min(effectiveTickStepMs, 5000)),
+        intervalMs: effectiveAggregationIntervalMs,
         mode: aggregation,
-    }), [aggregation, dataKey, effectiveTickStepMs, visibleData]);
+    }), [aggregation, dataKey, effectiveAggregationIntervalMs, visibleData]);
     const chartData = useMemo(
         () => insertGapBreaks(aggregatedData, dataKey, gapThresholdMs),
         [aggregatedData, dataKey, gapThresholdMs]

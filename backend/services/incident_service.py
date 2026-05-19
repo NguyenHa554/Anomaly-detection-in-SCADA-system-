@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import Alert, Incident
 from backend.services.alert_service import ALERT_TYPE_DANGER
+from backend.utils.time import utc_isoformat
 
 INCIDENT_STATUS_OPEN = "OPEN"
 INCIDENT_STATUS_CLOSED = "CLOSED"
@@ -57,10 +58,10 @@ def incident_to_dict(incident: Incident) -> Dict:
     return {
         "id": incident.id,
         "incident_id": incident.id,
-        "created_at": incident.created_at.isoformat() if incident.created_at else None,
-        "updated_at": incident.updated_at.isoformat() if incident.updated_at else None,
-        "start_time": incident.start_time.isoformat() if incident.start_time else None,
-        "end_time": incident.end_time.isoformat() if incident.end_time else None,
+        "created_at": utc_isoformat(incident.created_at),
+        "updated_at": utc_isoformat(incident.updated_at),
+        "start_time": utc_isoformat(incident.start_time),
+        "end_time": utc_isoformat(incident.end_time),
         "stage": incident.primary_stage,
         "first_detected_stage": incident.first_detected_stage,
         "primary_stage": incident.primary_stage,
@@ -73,7 +74,7 @@ def incident_to_dict(incident: Incident) -> Dict:
         "message": message,
         "evidence": incident.evidence or {},
         "acknowledged": bool(incident.acknowledged),
-        "acknowledged_at": incident.acknowledged_at.isoformat() if incident.acknowledged_at else None,
+        "acknowledged_at": utc_isoformat(incident.acknowledged_at),
     }
 
 

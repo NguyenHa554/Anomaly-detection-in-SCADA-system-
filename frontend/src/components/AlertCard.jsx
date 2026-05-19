@@ -1,9 +1,9 @@
 import { acknowledgeAlert } from '../services/api';
+import { formatBackendTime } from '../utils/time';
 
 function formatTime(ts) {
     if (!ts) return '--';
-    const d = new Date(ts);
-    return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    return formatBackendTime(ts, { hour: '2-digit', minute: '2-digit' });
 }
 
 export default function AlertCard({ alert, onAcknowledged }) {

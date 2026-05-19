@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 import { getAlerts, getHistory, getStatus } from '../services/api';
 import { MONITORED_STAGES, MONITORING_ONLY_STAGES, STAGE_CONFIG, STAGES } from '../constants/stages';
+import { formatBackendDateTime } from '../utils/time';
 
 const SNAPSHOT_OPTIONS = [
     { value: 'current', label: 'Current snapshot' },
@@ -68,7 +69,7 @@ function formatNumber(value, digits = 2) {
 
 function formatTimestamp(ts) {
     if (!ts) return '--';
-    return new Date(ts).toLocaleString('vi-VN', {
+    return formatBackendDateTime(ts, {
         hour: '2-digit',
         minute: '2-digit',
         day: '2-digit',

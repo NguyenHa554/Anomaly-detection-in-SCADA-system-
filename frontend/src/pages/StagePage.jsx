@@ -11,12 +11,15 @@ import {
 import { useScadaStream } from '../context/scadaStreamContextValue';
 import StatusCard from '../components/StatusCard';
 import SensorChart from '../components/SensorChart';
+import DeviceHistoryModal from '../components/DeviceHistoryModal';
+import {
+    buildDeviceHistory,
+    DAY_HISTORY_LIMIT,
+} from '../services/deviceHistory';
 import { STAGE_CONFIG } from '../constants/stages';
+import { parseBackendTimestamp } from '../utils/time';
 
-const DAY_HISTORY_LIMIT = 86400;
-const DEVICE_HISTORY_WINDOW_MS = 60 * 60 * 1000;
 const STREAM_GAP_THRESHOLD_MS = 15 * 1000;
-const DAY_HISTORY_GAP_THRESHOLD_MS = 5 * 60 * 1000;
 
 function parseNumericValue(value) {
     const parsed = Number(value);
@@ -24,8 +27,7 @@ function parseNumericValue(value) {
 }
 
 function parseTimestamp(value) {
-    const timestamp = Date.parse(value);
-    return Number.isFinite(timestamp) ? timestamp : null;
+    return parseBackendTimestamp(value);
 }
 
 function buildCurrentData(config, sensorValues = {}, actuatorValues = {}, rawValues = {}) {
@@ -54,132 +56,6 @@ function buildSeriesPoint(timestamp, value, isAnomaly) {
 
 function getStageCacheKey(stageKey) {
     return `stage-session-${stageKey || 'unknown'}-v1`;
-}
-
-function buildDeviceHistory(rows, field, kind) {
-    const latestTimestamp = rows.reduce((latest, row) => {
-        const ts = parseTimestamp(row.timestamp);
-        return ts != null && ts > latest ? ts : latest;
-    }, 0);
-    const historyStart = latestTimestamp ? latestTimestamp - DEVICE_HISTORY_WINDOW_MS : 0;
-
-    return rows
-        .map((row) => {
-            const timestamp = parseTimestamp(row.timestamp);
-            const source = kind === 'actuator' ? row.actuator_values : row.sensor_values;
-            const fallbackSource = row.raw_values || {};
-            const value = parseNumericValue(source?.[field] ?? fallbackSource[field]);
-
-            if (timestamp == null || value == null || (historyStart && timestamp < historyStart)) {
-                return null;
-            }
-
-            return {
-                ts: timestamp,
-                value,
-                isAnomaly: Boolean(row.is_anomaly),
-            };
-        })
-        .filter(Boolean);
-}
-
-function formatDetailTimestamp(timestamp) {
-    const date = new Date(timestamp);
-    return Number.isNaN(date.getTime()) ? '--' : date.toLocaleString('vi-VN');
-}
-
-function DeviceHistoryModal({ device, points, loading, onClose }) {
-    if (!device) {
-        return null;
-    }
-
-    const latestPoint = points.at(-1);
-    const minValue = points.length ? Math.min(...points.map((point) => point.value)) : null;
-    const maxValue = points.length ? Math.max(...points.map((point) => point.value)) : null;
-
-    return (
-        <div className="device-modal-backdrop" role="presentation" onClick={onClose}>
-            <section className="device-modal" role="dialog" aria-modal="true" aria-label={`${device.field} 1 hour history`} onClick={(event) => event.stopPropagation()}>
-                <div className="device-modal-header">
-                    <div>
-                        <div className="device-modal-eyebrow">{device.kind === 'actuator' ? 'Actuator' : 'Sensor'} history</div>
-                        <h2 className="device-modal-title">{device.field}</h2>
-                        <div className="device-modal-subtitle">Last 1 hour from stored stage history</div>
-                    </div>
-                    <button className="device-modal-close" type="button" onClick={onClose} aria-label="Close device history">
-                        <span className="material-symbols-outlined">close</span>
-                    </button>
-                </div>
-
-                <div className="device-modal-stats">
-                    <div>
-                        <span>Latest</span>
-                        <strong>{latestPoint ? latestPoint.value.toFixed(2) : '--'}</strong>
-                    </div>
-                    <div>
-                        <span>Min</span>
-                        <strong>{minValue != null ? minValue.toFixed(2) : '--'}</strong>
-                    </div>
-                    <div>
-                        <span>Max</span>
-                        <strong>{maxValue != null ? maxValue.toFixed(2) : '--'}</strong>
-                    </div>
-                    <div>
-                        <span>Samples</span>
-                        <strong>{points.length}</strong>
-                    </div>
-                </div>
-
-                <div className="device-modal-chart">
-                    {loading ? (
-                        <div className="device-modal-empty">Loading device history...</div>
-                    ) : points.length > 0 ? (
-                        <SensorChart
-                            data={points}
-                            threshold={null}
-                            height={300}
-                            dataKey="value"
-                            windowMs={DEVICE_HISTORY_WINDOW_MS}
-                            tickStepMs={5 * 60 * 1000}
-                            minTickPx={112}
-                            showMiniOverview
-                            resetKey={`modal-${device.field}`}
-                            gapThresholdMs={DAY_HISTORY_GAP_THRESHOLD_MS}
-                            aggregation="avg"
-                        />
-                    ) : (
-                        <div className="device-modal-empty">No stored values for this device</div>
-                    )}
-                </div>
-
-                <div className="device-modal-table-wrap">
-                    <table className="device-modal-table">
-                        <thead>
-                            <tr>
-                                <th>Time</th>
-                                <th>Value</th>
-                                <th>Window state</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {points.slice(-300).reverse().map((point) => (
-                                <tr key={`${point.ts}-${point.value}`}>
-                                    <td>{formatDetailTimestamp(point.ts)}</td>
-                                    <td>{point.value.toFixed(4)}</td>
-                                    <td>{point.isAnomaly ? 'DANGER' : 'NORMAL'}</td>
-                                </tr>
-                            ))}
-                            {!loading && points.length === 0 && (
-                                <tr>
-                                    <td colSpan="3">No rows available</td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-        </div>
-    );
 }
 
 export default function StagePage() {
@@ -353,7 +229,7 @@ export default function StagePage() {
                                 key={sensor}
                                 type="button"
                                 className="device-chart-card"
-                                onClick={() => openDeviceHistory({ field: sensor, kind: 'sensor' })}
+                                onClick={() => openDeviceHistory({ field: sensor, kind: 'sensor', stage: stageKey })}
                             >
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
                                     <div style={{ fontWeight: 600 }}>{sensor}</div>
@@ -394,11 +270,11 @@ export default function StagePage() {
                                     key={actuator}
                                     role="button"
                                     tabIndex={0}
-                                    onClick={() => openDeviceHistory({ field: actuator, kind: 'actuator' })}
+                                    onClick={() => openDeviceHistory({ field: actuator, kind: 'actuator', stage: stageKey })}
                                     onKeyDown={(event) => {
                                         if (event.key === 'Enter' || event.key === ' ') {
                                             event.preventDefault();
-                                            openDeviceHistory({ field: actuator, kind: 'actuator' });
+                                            openDeviceHistory({ field: actuator, kind: 'actuator', stage: stageKey });
                                         }
                                     }}
                                     className="device-actuator-card"
